@@ -605,7 +605,6 @@ function PackedMatrix(A::Symmetric{T,<:AbstractMatrix{T}}) where {T}
     return result
 end
 
-# TODO: improve by replacing isdiag_triu with running next diagonal index
 function LinearAlgebra.dot(A::PackedMatrix{R}, B::PackedMatrix{R}) where {R}
     A.dim == B.dim || error("Matrices must have same dimensions")
     result = zero(R)
@@ -625,10 +624,19 @@ function LinearAlgebra.dot(A::PackedMatrix{R,<:SparseVector}, B::PackedMatrix{R}
     result = zero(R)
     nzs = rowvals(A.data)
     vs = nonzeros(A.data)
+    diags = PackedDiagonalIterator(A.dim, 0)
+    cur_diag = iterate(diags)
+    isnothing(cur_diag) && return result
     @inbounds @simd for i in 1:length(nzs) # for @simd, cannot iterate over (j, v)
         j = nzs[i]
         v = vs[i]
-        if isdiag_triu(j)
+        while cur_diag[1] < j
+            cur_diag = iterate(diags, cur_diag[2])
+            if isnothing(cur_diag)
+                cur_diag = (typemax(Int), cur_diag[2])
+            end
+        end
+        if cur_diag[1] == j
             result += conj(v) * B[j]
         else
             result += 2conj(v) * B[j]
@@ -644,27 +652,40 @@ function LinearAlgebra.dot(A::PackedMatrix{R,<:SparseVector}, B::PackedMatrix{R,
     nzB = rowvals(B.data)
     vA = nonzeros(A.data)
     vB = nonzeros(B.data)
-    iA = length(nzA)
-    iB = length(nzB)
-    @inbounds while iA ≥ 1 && iB ≥ 1
+    iAmax = length(nzA)
+    iBmax = length(nzB)
+    iA = 1
+    iB = 1
+    diags = PackedDiagonalIterator(A.dim, 0)
+    cur_diag = iterate(diags)
+    isnothing(cur_diag) && return result
+    @inbounds while iA ≤ iAmax && iB ≤ iBmax
         pA = nzA[iA]
         pB = nzB[iB]
-        if pA == pB
-            if isdiag_triu(pA)
-                result += conj(vA[pA]) * vB[pA]
-            else
-                result += 2conj(vA[pA]) * pB[pA]
-            end
-        else
-            while pA < pB
-                iB -= 1
-                pB = nzB[iB]
-            end
-            while pB < pA
-                iA -= 1
-                pA = nzA[iA]
+        while pA > pB
+            iB += 1
+            iB > iBmax && return result
+            pB = nzB[iB]
+        end
+        while pB > pA
+            iA += 1
+            iA > iAmax && return result
+            pA = nzA[iA]
+        end
+        @assert pA == pB
+        while cur_diag[1] < pA
+            cur_diag = iterate(diags, cur_diag[2])
+            if isnothing(cur_diag)
+                cur_diag = (typemax(Int), cur_diag[2])
             end
         end
+        if cur_diag[1] == pA
+            result += conj(vA[pA]) * vB[pA]
+        else
+            result += 2conj(vA[pA]) * vB[pA]
+        end
+        iA += 1
+        iB += 1
     end
     return result
 end
@@ -683,23 +704,32 @@ function LinearAlgebra.norm(pm::PackedMatrix{R}, p::Real=2) where {R}
     return result^(1/p)
 end
 
-function LinearAlgebra.norm2(pm::PackedMatrix{R}) where {R<:Real}
-    result = R(2) * BLAS.nrm2(pm.data)^2
-    i = 0
-    @inbounds @simd for j in 1:pm.dim
-        i += j
+function LinearAlgebra.norm2(pm::PackedMatrix{R}) where {R}
+    result = R(2) * LinearAlgebra.norm2(pm.data)^2
+    @inbounds for i in PackedDiagonalIterator(pm.dim, 0)
         result -= pm.data[i]^2
     end
     return sqrt(result)
 end
-function LinearAlgebra.norm2(pm::PackedMatrix{R,<:SparseVector}) where {R<:Real}
+function LinearAlgebra.norm2(pm::PackedMatrix{R,<:SparseVector}) where {R}
     nzs = rowvals(pm.data)
     vs = nonzeros(pm.data)
-    result = R(2) * BLAS.nrm2(vs)^2
-    @inbounds @simd for i in 1:length(nzs)
+    diags = PackedDiagonalIterator(pm.dim, 0)
+    cur_diag = iterate(diags)
+    isnothing(cur_diag) && return zero(R)
+    result = zero(R)
+    @inbounds for i in 1:length(nzs)
         j = nzs[i]
-        if isdiag_triu(j)
-            result -= abs(vs[i])^2
+        while cur_diag[1] < j
+            cur_diag = iterate(diags, cur_diag[2])
+            if isnothing(cur_diag)
+                cur_diag = (typemax(Int), cur_diag[2])
+            end
+        end
+        if cur_diag[1] == j
+            result += abs(vs[i])^2
+        else
+            result += 2abs(vs[i])^2
         end
     end
     return sqrt(result)
@@ -732,3 +762,20 @@ function LinearAlgebra.cholesky!(pm::PackedMatrix{R}, ::NoPivot = NoPivot(); shi
 end
 LinearAlgebra.isposdef(M::PackedMatrix{R}, tol::R=zero(R)) where {R<:Real} =
     isposdef(cholesky!(copy(M), shift=tol, check=false))
+
+function rmul_offdiags!(M::PackedMatrix{R}, factor::R) where {R}
+    diags = PackedDiagonalIterator(M.dim, 0)
+    data = M.data
+    for (d₁, d₂) in zip(diags, Iterators.drop(diags, 1))
+        @inbounds rmul!(@view(data[d₁+1:d₂-1]), factor)
+    end
+    return M
+end
+function lmul_offdiags!(M::PackedMatrix{R}, factor::R) where {R}
+    diags = PackedDiagonalIterator(M.dim, 0)
+    data = M.data
+    for (d₁, d₂) in zip(diags, Iterators.drop(diags, 1))
+        @inbounds lmul!(@view(data[d₁+1:d₂-1]), factor)
+    end
+    return M
+end
