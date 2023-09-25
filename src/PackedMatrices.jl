@@ -1,39 +1,63 @@
-# Symmetric square matrix, where we only store the upper triangle in col-major vectorized form
+module PackedMatrices
+
+export PackedMatrix, PackedMatrixUpper, PackedMatrixLower, packed_isupper, packed_islower, packed_isscaled, packedsize,
+    rmul_offdiags!, lmul_offdiags!, packed_scale!, packed_unscale!, spev!, spevd!, spevx!, pptrf!, spmv!, spr!, tpttr!, trttp!,
+    gemmt!, eigmin!, eigmax!
+
+using LinearAlgebra, SparseArrays
+
+# Symmetric square matrix. Depending on Fmt, we only store the upper or lower triangle in col-major vectorized or scaled
+# vectorized form.
 # The PackedMatrix can be effciently broadcast to other matrices, which works on the vector representation. It can also be
 # receive values from generic matrices by copyto! or broadcasting. Using it in a mixed chain of broadcastings of different type
 # is not implemented and will potentially lead to logical errors (in the sense that the types will not match) or even segfaults
 # (as the correct index mapping is not implemented).
-struct PackedMatrix{R,V<:AbstractVector{R}} <: AbstractMatrix{R}
+struct PackedMatrix{R,V<:AbstractVector{R},Fmt} <: AbstractMatrix{R}
     dim::Int
     data::V
 
-    function PackedMatrix(dim::Integer, data::AbstractVector{R}) where {R}
+    function PackedMatrix(dim::Integer, data::AbstractVector{R}, type::Symbol=:U) where {R}
         chkpacked(dim, data)
-        return new{R,typeof(data)}(dim, data)
+        type ∈ (:U, :L, :US, :LS) || error("Type must be one of :U, :L, :US, or :LS")
+        return new{R,typeof(data),type}(dim, data)
     end
 
-    function PackedMatrix{R}(::UndefInitializer, dim::Integer) where {R}
-        return new{R,Vector{R}}(dim, Vector{R}(undef, packedsize(dim)))
+    function PackedMatrix{R}(::UndefInitializer, dim::Integer, type::Symbol=:U) where {R}
+        type ∈ (:U, :L, :US, :LS) || error("Type must be one of :U, :L, :US, or :LS")
+        return new{R,Vector{R},type}(dim, Vector{R}(undef, packedsize(dim)))
     end
 end
+
+const PackedMatrixUpper{R,V} = Union{PackedMatrix{R,V,:U},PackedMatrix{R,V,:US}}
+const PackedMatrixLower{R,V} = Union{PackedMatrix{R,V,:L},PackedMatrix{R,V,:LS}}
+const PackedMatrixUnscaled{R,V} = Union{PackedMatrix{R,V,:U},PackedMatrix{R,V,:L}}
+const PackedMatrixScaled{R,V} = Union{PackedMatrix{R,V,:US},PackedMatrix{R,V,:LS}}
 
 @inline packedsize(dim) = dim * (dim +1) ÷ 2
-@inline rowcol_to_vec(row, col) = (@boundscheck(@assert(1 ≤ row ≤ col)); return col * (col -1) ÷ 2 + row)
-# check whether a linear index corresponds to a diagonal
-function isdiag_triu(idx::Signed)
-    col = 2
-    while idx > 1
-        idx -= col
-        col += 1
-    end
-    return idx == 1
-end
-struct PackedDiagonalIterator
+@inline rowcol_to_vec(P::PackedMatrixUpper, row, col) =
+    (@boundscheck(1 ≤ row ≤ col || throw(BoundsError(P, (row, col)))); return col * (col -1) ÷ 2 + row)
+@inline rowcol_to_vec(P::PackedMatrixLower, row, col) =
+    (@boundscheck(1 ≤ col ≤ row || throw(BoundsError(P, (row, col)))); return (2P.dim - col) * (col -1) ÷ 2 + row)
+
+packed_format(::PackedMatrix{R,V,Fmt}) where {R,V,Fmt} = Fmt
+packed_isupper(::PackedMatrixUpper) = true
+packed_isupper(::PackedMatrixLower) = false
+packed_isupper(s::Symbol) = s == :U || s == :US
+packed_islower(::PackedMatrixUpper) = false
+packed_islower(::PackedMatrixLower) = true
+packed_islower(s::Symbol) = s == :L || s == :LS
+packed_isscaled(::PackedMatrixUnscaled) = false
+packed_isscaled(::PackedMatrixScaled) = true
+packed_isscaled(s::Symbol) = s == :US || s == :LS
+packed_ulchar(x) = packed_isupper(x) ? 'U' : 'L'
+
+struct PackedDiagonalIterator{Fmt}
     dim::Int
     k::UInt
-    PackedDiagonalIterator(dim, k) = new(dim, abs(k))
+    PackedDiagonalIterator(P::PackedMatrixUpper, k) = new{:U}(P.dim, abs(k))
+    PackedDiagonalIterator(P::PackedMatrixLower, k) = new{:L}(P.dim, abs(k))
 end
-function Base.iterate(iter::PackedDiagonalIterator)
+function Base.iterate(iter::PackedDiagonalIterator{:U})
     if iter.k ≥ iter.dim
         return nothing
     else
@@ -41,7 +65,15 @@ function Base.iterate(iter::PackedDiagonalIterator)
         return j, (j, iter.k +2)
     end
 end
-function Base.iterate(iter::PackedDiagonalIterator, state)
+function Base.iterate(iter::PackedDiagonalIterator{:L})
+    if iter.k ≥ iter.dim
+        return nothing
+    else
+        j = iter.k +1
+        return j, (j, iter.dim)
+    end
+end
+function Base.iterate(iter::PackedDiagonalIterator{:U}, state)
     j, δ = state
     j += δ
     if δ > iter.dim
@@ -50,13 +82,22 @@ function Base.iterate(iter::PackedDiagonalIterator, state)
         return j, (j, δ +1)
     end
 end
+function Base.iterate(::PackedDiagonalIterator{:L}, state)
+    j, δ = state
+    if isone(δ)
+        return nothing
+    else
+        j += δ
+        return j, (j, δ -1)
+    end
+end
 Base.IteratorSize(::Type{PackedDiagonalIterator}) = Base.HasLength()
 Base.IteratorEltype(::Type{PackedDiagonalIterator}) = Base.HasEltype()
 Base.eltype(::PackedDiagonalIterator) = Int
 Base.length(iter::PackedDiagonalIterator) = iter.dim - iter.k
-LinearAlgebra.diagind(A::PackedMatrix, k::Integer=0) = collect(PackedDiagonalIterator(A.dim, k))
+LinearAlgebra.diagind(A::PackedMatrix, k::Integer=0) = collect(PackedDiagonalIterator(A, k))
 function LinearAlgebra.diag(A::PackedMatrix{R}, k::Integer=0) where {R}
-    iter = PackedDiagonalIterator(A.dim, k)
+    iter = PackedDiagonalIterator(A, k)
     diagonal = Vector{R}(undef, length(iter))
     for (i, idx) in enumerate(iter)
         @inbounds diagonal[i] = A[idx]
@@ -65,31 +106,94 @@ function LinearAlgebra.diag(A::PackedMatrix{R}, k::Integer=0) where {R}
 end
 function LinearAlgebra.tr(A::PackedMatrix{R}) where {R}
     trace = zero(R)
-    for idx in PackedDiagonalIterator(A.dim, 0)
+    for idx in PackedDiagonalIterator(A, 0)
         @inbounds trace += A[idx]
     end
     return trace
 end
 
+function rmul_offdiags!(M::PackedMatrix{R}, factor::R) where {R}
+    diags = PackedDiagonalIterator(M, 0)
+    data = M.data
+    for (d₁, d₂) in zip(diags, Iterators.drop(diags, 1))
+        @inbounds rmul!(@view(data[d₁+1:d₂-1]), factor)
+    end
+    return M
+end
+function lmul_offdiags!(M::PackedMatrix{R}, factor::R) where {R}
+    diags = PackedDiagonalIterator(M, 0)
+    data = M.data
+    for (d₁, d₂) in zip(diags, Iterators.drop(diags, 1))
+        @inbounds lmul!(@view(data[d₁+1:d₂-1]), factor)
+    end
+    return M
+end
+
+packed_scale!(P::PackedMatrixScaled) = P
+packed_scale!(P::PackedMatrixUnscaled{R}) where {R} =
+    rmul_offdiags!(PackedMatrix(P.dim, P.data, packed_isupper(P) ? :US : :LS), sqrt(R(2)))
+packed_unscale!(P::PackedMatrixScaled{R}) where {R} =
+    rmul_offdiags!(PackedMatrix(P.dim, P.data, packed_isupper(P) ? :U : :L), sqrt(inv(R(2))))
+packed_unscale!(P::PackedMatrixUnscaled) = P
+
+function PackedMatrix(P::PackedMatrix, format::Symbol=packed_format(P))
+    packed_isupper(P) == packed_isupper(format) || error("Changing the storage direction is not supported at the moment")
+    if packed_isscaled(format)
+        return packed_scale!(copy(P))
+    else
+        return packed_unscale!(copy(P))
+    end
+end
+
 Base.size(P::PackedMatrix) = (P.dim, P.dim)
 Base.eltype(::PackedMatrix{R}) where {R} = R
 Base.@propagate_inbounds Base.getindex(P::PackedMatrix, idx) = P.data[idx]
-Base.@propagate_inbounds Base.getindex(P::PackedMatrix, row, col) =
-    P.data[@inbounds rowcol_to_vec(min(row, col), max(row, col))]
+Base.@propagate_inbounds Base.getindex(P::PackedMatrix{R,V,:U}, row, col) where {R,V} =
+    P.data[@inbounds rowcol_to_vec(P, min(row, col), max(row, col))]
+Base.@propagate_inbounds function Base.getindex(P::PackedMatrix{R,V,:US}, row, col) where {R,V}
+    val = P.data[@inbounds rowcol_to_vec(P, min(row, col), max(row, col))]
+    return row == col ? val : sqrt(inv(R(2))) * val
+end
+Base.@propagate_inbounds Base.getindex(P::PackedMatrix{R,V,:L}, row, col) where {R,V} =
+    P.data[@inbounds rowcol_to_vec(P, max(row, col), min(row, col))]
+Base.@propagate_inbounds function Base.getindex(P::PackedMatrix{R,V,:LS}, row, col) where {R,V}
+    val = P.data[@inbounds rowcol_to_vec(P, max(row, col), min(row, col))]
+    return row == col ? val : sqrt(inv(R(2))) * val
+end
 Base.@propagate_inbounds Base.setindex!(P::PackedMatrix, X, idx::Union{Integer,LinearIndices}) = P.data[idx] = X
-Base.@propagate_inbounds Base.setindex!(P::PackedMatrix, X, row, col) =
-    P.data[@inbounds rowcol_to_vec(min(row, col), max(row, col))] = X
+Base.@propagate_inbounds Base.setindex!(P::PackedMatrix{R,V,:U}, X, row, col) where {R,V} =
+    P.data[@inbounds rowcol_to_vec(P, min(row, col), max(row, col))] = X
+Base.@propagate_inbounds function Base.setindex!(P::PackedMatrix{R,V,:US}, X, row, col) where {R,V}
+    if row != col
+        X *= sqrt(R(2))
+    end
+    P.data[@inbounds rowcol_to_vec(P, min(row, col), max(row, col))] = X
+end
+Base.@propagate_inbounds Base.setindex!(P::PackedMatrix{R,V,:L}, X, row, col) where {R,V} =
+    P.data[@inbounds rowcol_to_vec(P, max(row, col), min(row, col))] = X
+Base.@propagate_inbounds function Base.setindex!(P::PackedMatrix{R,V,:LS}, X, row, col) where {R,V}
+    if row != col
+        X *= sqrt(R(2))
+    end
+    P.data[@inbounds rowcol_to_vec(P, max(row, col), min(row, col))] = X
+end
 Base.IndexStyle(::PackedMatrix) = IndexLinear()
+Base.IteratorSize(::Type{<:PackedMatrix}) = Base.HasLength()
 Base.iterate(P::PackedMatrix, args...) = iterate(P.data, args...)
 Base.length(P::PackedMatrix) = length(P.data)
+Base.collect(P::PackedMatrix) = collect(P.data)
 Base.fill!(P::PackedMatrix{R}, x::R) where {R} = fill!(P.data, x)
-Base.copy(P::PackedMatrix) = PackedMatrix(P.dim, copy(P.data))
+Base.copy(P::PackedMatrix) = PackedMatrix(P.dim, copy(P.data), packed_format(P))
 for cp in (:copy!, :copyto!)
-    @eval begin
-        Base.@propagate_inbounds function Base.$cp(dst::PackedMatrix{R}, src::PackedMatrix{R}) where {R}
-            $cp(dst.data, src.data)
-            return dst
+    for Fmt in (:(:U), :(:L), :(:US), :(:LS)) # we need to be so specific, as there would be ambiguities with the copyto!s below
+        @eval begin
+            Base.@propagate_inbounds function Base.$cp(dst::PackedMatrix{R1,V1,$Fmt}, src::PackedMatrix{R2,V2,$Fmt}) where {R1,V1,R2,V2}
+                $cp(dst.data, src.data)
+                return dst
+            end
         end
+    end
+    @eval begin
         Base.@propagate_inbounds function Base.$cp(dst::PackedMatrix{R}, src::AbstractVector{R}) where {R}
             $cp(dst.data, src)
             return dst
@@ -97,7 +201,7 @@ for cp in (:copy!, :copyto!)
         Base.@propagate_inbounds Base.$cp(dst::AbstractVector{R}, src::PackedMatrix{R}) where {R} = $cp(dst, src.data)
     end
 end
-function Base.copyto!(dst::PackedMatrix{R}, src::AbstractMatrix{R}) where {R}
+function Base.copyto!(dst::PackedMatrix{R,V,:U}, src::AbstractMatrix{R}) where {R,V}
     j = 1
     for (i, col) in enumerate(eachcol(src))
         @inbounds copyto!(dst.data, j, col, 1, i)
@@ -105,19 +209,52 @@ function Base.copyto!(dst::PackedMatrix{R}, src::AbstractMatrix{R}) where {R}
     end
     return dst
 end
+function Base.copyto!(dst::PackedMatrix{R,V,:US}, src::AbstractMatrix{R}) where {R,V}
+    j = 1
+    @inbounds for (i, col) in enumerate(eachcol(src))
+        @views dst.data[j:j+i-2] .= sqrt(R(2)) .* col[1:i-1]
+        dst.data[j+i-1] = col[i]
+        j += i
+    end
+    return dst
+end
+function Base.copyto!(dst::PackedMatrix{R,V,:L}, src::AbstractMatrix{R}) where {R,V}
+    j = 1
+    l = src.dim
+    for (i, col) in enumerate(eachcol(src))
+        @inbounds copyto!(dst.data, j, col, i, l)
+        j += l
+        l -= 1
+    end
+end
+function Base.copyto!(dst::PackedMatrix{R,V,:LS}, src::AbstractMatrix{R}) where {R,V}
+    j = 1
+    l = src.dim
+    @inbounds for (i, col) in enumerate(eachcol(src))
+        dst.data[j] = col[i]
+        @views dst.data[j+1:j+l-1] .= sqrt(R(2)) .* col[i+1:i+l-1]
+        j += l
+        l -= 1
+    end
+end
 function Base.copy!(dst::PackedMatrix{R}, src::AbstractMatrix{R}) where {R}
     @boundscheck checkbounds(src, axes(dst)...)
     return copyto!(dst, src)
 end
-function Base.similar(P::PackedMatrix{R}, ::Type{T}=eltype(P), dims::NTuple{2,Int}=size(P)) where {R,T}
+function Base.similar(P::PackedMatrix{R}, ::Type{T}=eltype(P), dims::NTuple{2,Int}=size(P); format::Symbol=packed_format(P)) where {R,T}
     ==(dims...) || error("Packed matrices must be square")
     dim = first(dims)
-    return PackedMatrix(dim, similar(P.data, T, packedsize(dim)))
+    return PackedMatrix(dim, similar(P.data, T, packedsize(dim)), format)
 end
 LinearAlgebra.vec(P::PackedMatrix) = P.data
 Base.convert(T::Type{<:Ptr}, P::PackedMatrix) = convert(T, P.data)
+Base.reshape(P::PackedMatrix, ::Val{1}) = P.data # controversial? But it allows taking views with linear indices appropriately.
 
 # Broadcasting
+# idea: allow the PackedMatrix to work either as a vector or as a matrix, depending on the broadcasting context.
+# However, this doesn't seem to work in all cases, so instead of providing a partially buggy implementation, we default to
+# always treating the PackedMatrix as equivalent to its vector in broadcasting.
+# We still perform a check so that we don't combine incompatible formats.
 Base.broadcastable(P::PackedMatrix) = PackedMatrixBroadcasting{typeof(P)}(P)
 struct PackedMatrixBroadcasting{PM<:PackedMatrix} <: AbstractVector{eltype(PM)}
     data::PM
@@ -126,19 +263,35 @@ Base.size(PB::PackedMatrixBroadcasting) = size(PB.data.data)
 Base.axes(PB::PackedMatrixBroadcasting) = axes(PB.data.data)
 Base.getindex(PB::PackedMatrixBroadcasting, ind::Int) = PB.data.data[ind]
 Base.setindex!(PB::PackedMatrixBroadcasting, val, ind::Int) = PB.data.data[ind] = val
+#=@inline Broadcast.combine_axes(A::PackedMatrixBroadcasting, B) = try
+    return Broadcast.broadcast_shape(axes(A), axes(B))
+catch
+    return Broadcast.broadcast_shape(axes(A.data), axes(B))
+end
+@inline Broadcast.combine_axes(A, B::PackedMatrixBroadcasting) = try
+    return Broadcast.broadcast_shape(axes(A), axes(B))
+catch
+    return Broadcast.broadcast_shape(axes(A), axes(B.data))
+end
+@inline Broadcast.combine_axes(A::PackedMatrixBroadcasting, B::PackedMatrixBroadcasting) = Broadcast.broadcast_shape(axes(A), axes(B))=#
 
-struct PackedMatrixStyle <: Broadcast.AbstractArrayStyle{1} end
-PackedMatrixStyle(::Val{1}) = PackedMatrixStyle()
-PackedMatrixStyle(::Val{2}) = PackedMatrixGenericStyle()
-Base.BroadcastStyle(::Type{<:Union{<:PackedMatrixBroadcasting,<:PackedMatrix}}) = PackedMatrixStyle()
-Base.similar(bc::Broadcast.Broadcasted{PackedMatrixStyle}, ::Type{T}) where {T} = similar(find_pm(bc).data, T)
+struct PackedMatrixStyle{Fmt} <: Broadcast.AbstractArrayStyle{1} end
+PackedMatrixStyle{Fmt}(::Val{1}) where {Fmt} = PackedMatrixStyle{Fmt}()
+PackedMatrixStyle{Fmt}(::Val{2}) where {Fmt} = error("Broadcasting a PackedMatrix will only work on the vectorized data")
+#PackedMatrixStyle{Fmt}(::Val{2}) where {Fmt} = PackedMatrixGenericStyle{Fmt}()
+Base.BroadcastStyle(::Type{<:Union{<:PackedMatrixBroadcasting{<:PackedMatrix{R,V,Fmt} where {R,V}},<:PackedMatrix{R,V,Fmt} where {R,V}}}) where {Fmt} =
+    PackedMatrixStyle{Fmt}()
+Base.similar(bc::Broadcast.Broadcasted{P}, ::Type{T}) where {T,Fmt,P<:PackedMatrixStyle{Fmt}} =
+    PackedMatrix{T}(undef, (isqrt(1 + 8length(bc)) -1) ÷ 2, Fmt)
+    #=similar(find_pm(bc).data, T)
 find_pm(bc::Base.Broadcast.Broadcasted) = find_pm(bc.args)
 find_pm(args::Tuple) = find_pm(find_pm(args[1]), Base.tail(args))
+find_pm(E::Broadcast.Extruded{<:PackedMatrixBroadcasting}) = E.x
 find_pm(x) = x
 find_pm(::Tuple{}) = nothing
 find_pm(P::PackedMatrixBroadcasting, ::Any) = P
-find_pm(::Any, rest) = find_pm(rest)
-@inline function Base.copyto!(dest::PackedMatrix, bc::Broadcast.Broadcasted{PackedMatrixStyle})
+find_pm(::Any, rest) = find_pm(rest)=#
+@inline function Base.copyto!(dest::PackedMatrix{R,V,Fmt} where {R,V}, bc::Broadcast.Broadcasted{PackedMatrixStyle{Fmt}}) where {Fmt}
     axes(dest.data) == axes(bc) || Broadcast.throwdm(axes(dest.data), axes(bc))
     # Performance optimization: broadcast!(identity, dest, A) is equivalent to copyto!(dest, A) if indices match
     if bc.f === identity && bc.args isa Tuple{AbstractArray} # only a single input argument to broadcast!
@@ -155,14 +308,18 @@ find_pm(::Any, rest) = find_pm(rest)
     end
     return dest
 end
-Base.Broadcast.materialize!(s::PackedMatrixStyle, dest::PackedMatrix, bc::Broadcast.Broadcasted{PackedMatrixStyle}) =
+Base.Broadcast.materialize!(s::PackedMatrixStyle{Fmt}, dest::PackedMatrix{R,V,Fmt} where {R,V}, bc::Broadcast.Broadcasted{PackedMatrixStyle{Fmt}}) where {Fmt} =
     (Base.Broadcast.materialize!(s, dest.data, bc); return dest)
-struct PackedMatrixGenericStyle <: Broadcast.AbstractArrayStyle{2} end
-PackedMatrixGenericStyle(::Val{1}) = PackedMatrixStyle()
-PackedMatrixGenericStyle(::Val{2}) = PackedMatrixGenericStyle()
-Base.BroadcastStyle(::PackedMatrixStyle, ::Broadcast.DefaultArrayStyle{2}) = PackedMatrixGenericStyle()
-Base.BroadcastStyle(::PackedMatrixGenericStyle, ::Broadcast.DefaultArrayStyle{1}) = PackedMatrixStyle()
-@inline function Base.copyto!(dest::PackedMatrix, bc::Broadcast.Broadcasted{PackedMatrixGenericStyle})
+Base.BroadcastStyle(::PackedMatrixStyle{Fmt}, ::PackedMatrixStyle{Fmt}) where {Fmt} = PackedMatrixStyle{Fmt}()
+Base.BroadcastStyle(::PackedMatrixStyle, ::PackedMatrixStyle) =
+    error("Packed matrices with different formats cannot be combined")
+#=struct PackedMatrixGenericStyle{Fmt} <: Broadcast.AbstractArrayStyle{2} end
+PackedMatrixGenericStyle{Fmt}(::Val{1}) where {Fmt} = PackedMatrixStyle{Fmt}()
+PackedMatrixGenericStyle{Fmt}(::Val{2}) where {Fmt} = PackedMatrixGenericStyle{Fmt}()
+Base.BroadcastStyle(::PackedMatrixStyle{Fmt}, ::Broadcast.DefaultArrayStyle{2}) where {Fmt} = PackedMatrixGenericStyle{Fmt}()
+Base.BroadcastStyle(::PackedMatrixGenericStyle{Fmt}, ::Broadcast.DefaultArrayStyle{1}) where {Fmt} = PackedMatrixStyle{Fmt}()
+Base.similar(bc::Broadcast.Broadcasted{<:PackedMatrixGenericStyle}, ::Type{T}) where {T} = similar(Array{T}, axes(bc))
+@inline function Base.copyto!(dest::PackedMatrix{R,V,Fmt} where {R,V}, bc::Broadcast.Broadcasted{PackedMatrixGenericStyle{Fmt}}) where {Fmt}
     axes(dest) == axes(bc) || Broadcast.throwdm(axes(dest), axes(bc))
     if bc.f === identity && bc.args isa Tuple{AbstractArray}
         A = bc.args[1]
@@ -175,7 +332,7 @@ Base.BroadcastStyle(::PackedMatrixGenericStyle, ::Broadcast.DefaultArrayStyle{1}
         dest[I] = bc′[I]
     end
     return dest
-end
+end=#
 
 chkpacked(n::Integer, AP::AbstractVector) = 2length(AP) == n * (n +1) || error("Packed storage length does not match dimension")
 for (spev, spevd, spevx, pptrf, spmv, spr, tpttr, trttp, gemmt, elty) in
@@ -581,140 +738,171 @@ end
 LinearAlgebra.axpy!(a::Number, x::PackedMatrix, y::AbstractVector) = LinearAlgebra.axpy!(a, x.data, y)
 LinearAlgebra.axpy!(a::Number, x::AbstractVector, y::PackedMatrix) = LinearAlgebra.axpy!(a, x, y.data)
 LinearAlgebra.axpy!(a::Number, x::PackedMatrix, y::PackedMatrix) = LinearAlgebra.axpy!(a, x.data, y.data)
-# TODO: double-sparse implementations similar to dot
 
-
-# These are for multiplications where the matrix is directly interpreted as a vector. Note that this implies that off-diagonal
-# elements only enter once.
+# These are for multiplications where the matrix is directly interpreted as a vector.
 LinearAlgebra.mul!(C::PackedMatrix, A::AbstractMatrix, B::AbstractVector, α::Number, β::Number) = mul!(C.data, A, B, α, β)
 LinearAlgebra.mul!(C::AbstractVector, A::AbstractMatrix, B::PackedMatrix, α::Number, β::Number) = mul!(C, A, B.data, α, β)
-# And this is the symmetric multiplication
-LinearAlgebra.mul!(C::AbstractVector, A::PackedMatrix, B::AbstractVector, α::Number, β::Number) =
-    spmv!('U', α, A.data, B, β, C)
-# Also a wrapper for rank-one updates
-spr!(α, x::AbstractVector, AP::PackedMatrix) = spr!('U', α, x, AP.data)
-function Base.Matrix{T}(A::PackedMatrix{T}) where {T}
-    result = Matrix{T}(undef, A.dim, A.dim)
-    tpttr!('U', A.data, result)
-    return Symmetric(result)
+# And this is the symmetric multiplication. BLAS only offers it for the packed format. So either we write a helper that
+# - allocates a copy and unscales it (bad - mul! shouldn't allocate) or
+# - unscales the matrix, multiplies and rescales (bad - floating point not necessarily reversible; not threadsafe)
+# or we leave this unsupported.
+LinearAlgebra.mul!(C::AbstractVector, A::PackedMatrixUnscaled, B::AbstractVector, α::Number, β::Number) =
+    spmv!(packed_ulchar(A), α, A.data, B, β, C)
+# Also a wrapper for rank-one updates. Here, we are allowed to mutate AP, so we un-scale it. But beware, the type may change!
+function spr!(α, x::AbstractVector, AP::PackedMatrix)
+    APu = packed_unscale!(AP)
+    spr!(packed_ulchar(APu), α, x, APu.data)
+    return APu
 end
-function PackedMatrix(A::Symmetric{T,<:AbstractMatrix{T}}) where {T}
-    A.uplo == 'U' || error("PackedMatrix requires the input matrix to be stored in the upper triangle.")
-    result = PackedMatrix{T}(undef, size(A, 1))
-    trttp!('U', parent(A), result.data)
+function Base.Matrix{R}(A::PackedMatrixUnscaled{R}) where {R}
+    result = Matrix{R}(undef, A.dim, A.dim)
+    tpttr!(packed_ulchar(A), A.data, result)
+    return Symmetric(result, packed_isupper(A) ? :U : :L)
+end
+function Base.Matrix{R}(A::PackedMatrix{R,V,:US}) where {R,V}
+    result = Matrix{R}(undef, A.dim, A.dim)
+    tpttr!('U', A.data, result)
+    for j in 2:A.dim
+        @inbounds rmul!(@view(result[1:j-1, j]), sqrt(inv(R(2))))
+    end
+    return Symmetric(result, :U)
+end
+function Base.Matrix{R}(A::PackedMatrix{R,V,:LS}) where {R,V}
+    result = Matrix{R}(undef, A.dim, A.dim)
+    tpttr!('L', A.data, result)
+    for j in 1:A.dim-1
+        @inbounds rmul!(@view(result[j+1:end, j]), sqrt(inv(R(2))))
+    end
+    return Symmetric(result, :L)
+end
+function PackedMatrix(A::Symmetric{R,<:AbstractMatrix{R}}) where {R}
+    result = PackedMatrix{R}(undef, size(A, 1), A.uplo == 'U' ? :U : :L)
+    trttp!(A.uplo, parent(A), result.data)
     return result
 end
 
-function LinearAlgebra.dot(A::PackedMatrix{R}, B::PackedMatrix{R}) where {R}
+function LinearAlgebra.dot(A::PackedMatrix{R1,V,Fmt} where {V}, B::PackedMatrix{R2,V,Fmt} where {V}) where {R1,R2,Fmt}
     A.dim == B.dim || error("Matrices must have same dimensions")
-    result = zero(R)
-    i = 1
-    @inbounds @simd for j in 1:A.dim
-        for _ in 1:j-1
-            result += 2conj(A[i]) * B[i]
-            i += 1
-        end
-        result += conj(A[i]) * B[i]
-        i += 1
-    end
-    return result
-end
-function LinearAlgebra.dot(A::PackedMatrix{R,<:SparseVector}, B::PackedMatrix{R}) where {R}
-    A.dim == B.dim || error("Matrices must have same dimensions")
-    result = zero(R)
-    nzs = rowvals(A.data)
-    vs = nonzeros(A.data)
-    diags = PackedDiagonalIterator(A.dim, 0)
-    cur_diag = iterate(diags)
-    isnothing(cur_diag) && return result
-    @inbounds @simd for i in 1:length(nzs) # for @simd, cannot iterate over (j, v)
-        j = nzs[i]
-        v = vs[i]
-        while cur_diag[1] < j
+    if packed_isscaled(Fmt)
+        return dot(A.data, B.data)
+    else
+        result = zero(promote_type(R1, R2))
+        diags = PackedDiagonalIterator(A, 0)
+        cur_diag = iterate(diags)
+        i = 1
+        @inbounds while !isnothing(cur_diag)
+            @simd for j in i:cur_diag[1]-1
+                result += 2conj(A[j]) * B[j]
+            end
+            result += conj(A[cur_diag[1]]) * B[cur_diag[1]]
+            i = cur_diag[1] +1
             cur_diag = iterate(diags, cur_diag[2])
-            if isnothing(cur_diag)
-                cur_diag = (typemax(Int), cur_diag[2])
+        end
+        return result
+    end
+end
+function LinearAlgebra.dot(A::PackedMatrix{R1,<:SparseVector,Fmt}, B::PackedMatrix{R2,V,Fmt} where {V}) where {R1,R2,Fmt}
+    A.dim == B.dim || error("Matrices must have same dimensions")
+    if packed_isscaled(Fmt)
+        return dot(A.data, B.data)
+    else
+        result = zero(promote_type(R1, R2))
+        nzs = rowvals(A.data)
+        vs = nonzeros(A.data)
+        diags = PackedDiagonalIterator(A, 0)
+        cur_diag = iterate(diags)
+        isnothing(cur_diag) && return result
+        @inbounds for i in 1:length(nzs) # for @simd, cannot iterate over (j, v)
+            j = nzs[i]
+            v = vs[i]
+            while cur_diag[1] < j
+                cur_diag = iterate(diags, cur_diag[2])
+                if isnothing(cur_diag)
+                    cur_diag = (typemax(Int), cur_diag[2])
+                end
+            end
+            if cur_diag[1] == j
+                result += conj(v) * B[j]
+            else
+                result += 2conj(v) * B[j]
             end
         end
-        if cur_diag[1] == j
-            result += conj(v) * B[j]
-        else
-            result += 2conj(v) * B[j]
-        end
+        return result
     end
-    return result
 end
 LinearAlgebra.dot(A::PackedMatrix{R}, B::PackedMatrix{R,<:SparseVector}) where {R} = conj(dot(B, A))
-function LinearAlgebra.dot(A::PackedMatrix{R,<:SparseVector}, B::PackedMatrix{R,<:SparseVector}) where {R}
+function LinearAlgebra.dot(A::PackedMatrix{R1,<:SparseVector,Fmt}, B::PackedMatrix{R2,<:SparseVector,Fmt}) where {R1,R2,Fmt}
     A.dim == B.dim || error("Matrices must have same dimensions")
-    result = zero(R)
-    nzA = rowvals(A.data)
-    nzB = rowvals(B.data)
-    vA = nonzeros(A.data)
-    vB = nonzeros(B.data)
-    iAmax = length(nzA)
-    iBmax = length(nzB)
-    iA = 1
-    iB = 1
-    diags = PackedDiagonalIterator(A.dim, 0)
-    cur_diag = iterate(diags)
-    isnothing(cur_diag) && return result
-    @inbounds while iA ≤ iAmax && iB ≤ iBmax
-        pA = nzA[iA]
-        pB = nzB[iB]
-        while pA > pB
-            iB += 1
-            iB > iBmax && return result
-            pB = nzB[iB]
-        end
-        while pB > pA
-            iA += 1
-            iA > iAmax && return result
+    if packed_isscaled(Fmt)
+        return dot(A.data, B.data)
+    else
+        result = zero(promote_type(R1, R2))
+        nzA = rowvals(A.data)
+        nzB = rowvals(B.data)
+        vA = nonzeros(A.data)
+        vB = nonzeros(B.data)
+        iAmax = length(nzA)
+        iBmax = length(nzB)
+        iA = 1
+        iB = 1
+        diags = PackedDiagonalIterator(A, 0)
+        cur_diag = iterate(diags)
+        isnothing(cur_diag) && return result
+        @inbounds while iA ≤ iAmax && iB ≤ iBmax
             pA = nzA[iA]
+            pB = nzB[iB]
+            while pA > pB
+                iB += 1
+                iB > iBmax && return result
+                pB = nzB[iB]
+            end
+            while pB > pA
+                iA += 1
+                iA > iAmax && return result
+                pA = nzA[iA]
+            end
+            @assert pA == pB
+            while cur_diag[1] < pA
+                cur_diag = iterate(diags, cur_diag[2])
+                if isnothing(cur_diag)
+                    cur_diag = (typemax(Int), cur_diag[2])
+                end
+            end
+            if cur_diag[1] == pA
+                result += conj(vA[iA]) * vB[iB]
+            else
+                result += 2conj(vA[iA]) * vB[iB]
+            end
+            iA += 1
+            iB += 1
         end
-        @assert pA == pB
-        while cur_diag[1] < pA
-            cur_diag = iterate(diags, cur_diag[2])
-            if isnothing(cur_diag)
-                cur_diag = (typemax(Int), cur_diag[2])
+        return result
+    end
+end
+
+function normapply(f, pm::PackedMatrix{R}, init::T=zero(R)) where {R,T}
+    result::T = init
+    diags = PackedDiagonalIterator(pm, 0)
+    cur_diag = iterate(diags)
+    i = 1
+    @inbounds while !isnothing(cur_diag)
+        @simd for j in i:cur_diag[1]-1
+            if packed_isscaled(pm)
+                result = f(result, pm.data[j] * sqrt(inv(R(2))), false)
+            else
+                result = f(result, pm.data[j], false)
             end
         end
-        if cur_diag[1] == pA
-            result += conj(vA[pA]) * vB[pA]
-        else
-            result += 2conj(vA[pA]) * vB[pA]
-        end
-        iA += 1
-        iB += 1
+        result = f(result, pm.data[cur_diag[1]], true)
+        i = cur_diag[1] +1
+        cur_diag = iterate(diags, cur_diag[2])
     end
     return result
 end
-
-function LinearAlgebra.norm(pm::PackedMatrix{R}, p::Real=2) where {R}
-    result = zero(R)
-    i = 1
-    @inbounds @simd for j in 1:pm.dim
-        for _ in 1:j-1
-            result += 2abs(pm.data[i])^p
-            i += 1
-        end
-        result += abs(pm.data[i])^p
-        i += 1
-    end
-    return result^(1/p)
-end
-
-function LinearAlgebra.norm2(pm::PackedMatrix{R}) where {R}
-    result = R(2) * LinearAlgebra.norm2(pm.data)^2
-    @inbounds for i in PackedDiagonalIterator(pm.dim, 0)
-        result -= pm.data[i]^2
-    end
-    return sqrt(result)
-end
-function LinearAlgebra.norm2(pm::PackedMatrix{R,<:SparseVector}) where {R}
+function normapply(f, pm::PackedMatrix{R,<:SparseVector}) where {R}
     nzs = rowvals(pm.data)
     vs = nonzeros(pm.data)
-    diags = PackedDiagonalIterator(pm.dim, 0)
+    diags = PackedDiagonalIterator(pm, 0)
     cur_diag = iterate(diags)
     isnothing(cur_diag) && return zero(R)
     result = zero(R)
@@ -727,55 +915,56 @@ function LinearAlgebra.norm2(pm::PackedMatrix{R,<:SparseVector}) where {R}
             end
         end
         if cur_diag[1] == j
-            result += abs(vs[i])^2
+            result = f(result, vs[i], true)
+        elseif packed_isscaled(pm)
+            result = f(result, vs[i] * sqrt(inv(R(2))), false)
         else
-            result += 2abs(vs[i])^2
+            result = f(result, vs[i], false)
         end
     end
-    return sqrt(result)
+    return result
 end
-LinearAlgebra.eigen!(pm::PackedMatrix{R}) where {R<:Real} = Eigen(spevd!('V', 'U', pm.dim, pm.data)...)
-LinearAlgebra.eigvals(pm::PackedMatrix{R}) where {R<:Real} = spevd!('N', 'U', pm.dim, copy(pm.data))
+LinearAlgebra.norm2(pm::PackedMatrixUnscaled) = sqrt(normapply((Σ, x, diag) -> Σ + (diag ? abs(x)^2 : 2abs(x)^2), pm))
+LinearAlgebra.norm2(pm::PackedMatrixScaled) = LinearAlgebra.norm2(pm.data)
+LinearAlgebra.norm2(pm::PackedMatrixScaled{R,<:SparseVector}) where {R} = LinearAlgebra.norm2(nonzeros(pm.data))
+LinearAlgebra.norm1(pm::PackedMatrix) = normapply((Σ, x, diag) -> Σ + (diag ? abs(x) : 2abs(x)), pm)
+LinearAlgebra.normInf(pm::PackedMatrixUnscaled) = LinearAlgebra.normInf(pm.data)
+LinearAlgebra.normInf(pm::PackedMatrixScaled) = normapply((m, x, diag) -> max(m, abs(x)), pm)
+Base._simple_count(f, pm::PackedMatrix, init::T) where {T} =
+    normapply((Σ, x, diag) -> f(x) ? (diag ? Σ + one(T) : Σ + one(T) + one(T)) : Σ, pm, init)
+LinearAlgebra.normMinusInf(pm::PackedMatrixUnscaled) = LinearAlgebra.normMinusInf(pm.data)
+LinearAlgebra.normMinusInf(pm::PackedMatrixScaled{R}) where {R} = normapply((m, x, diag) -> min(m, abs(x)), pm, R(Inf))
+LinearAlgebra.normp(pm::PackedMatrix, p) = normapply((Σ, x, diag) -> Σ + (diag ? abs(x)^p : 2abs(x)^p), pm)^(1/p)
+
+LinearAlgebra.eigen!(pm::PackedMatrix{R}) where {R<:Real} =
+    Eigen(spevd!('V', packed_ulchar(pm), pm.dim, packed_unscale!(pm).data)...)
+LinearAlgebra.eigvals(pm::PackedMatrix{R}) where {R<:Real} =
+    spevd!('N', packed_ulchar(pm), pm.dim, PackedMatrix(pm, packed_isupper(pm) ? :U : :L).data)
 LinearAlgebra.eigen!(pm::PackedMatrix{R}, vl::R, vu::R) where {R<:Real} =
-    Eigen(spevx!('V', 'V', 'U', pm.dim, pm.data, vl, vu, 0, 0, -one(R))...)
+    Eigen(spevx!('V', 'V', packed_ulchar(pm), pm.dim, packed_unscale!(pm).data, vl, vu, 0, 0, -one(R))...)
 LinearAlgebra.eigen!(pm::PackedMatrix{R}, range::UnitRange) where {R<:Real} =
-    Eigen(spevx!('V', 'I', 'U', pm.dim, pm.data, zero(R), zero(R), range.start, range.stop, -one(R))...)
+    Eigen(spevx!('V', 'I', packed_ulchar(pm), pm.dim, packed_unscale!(pm).data, zero(R), zero(R), range.start, range.stop,
+        -one(R))...)
 LinearAlgebra.eigvals!(pm::PackedMatrix{R}, vl::R, vu::R) where {R<:Real} =
-    spevx!('N', 'V', 'U', pm.dim, pm.data, vl, vu, 0, 0, -one(R))[1]
+    spevx!('N', 'V', packed_ulchar(pm), pm.dim, packed_unscale!(pm).data, vl, vu, 0, 0, -one(R))[1]
 LinearAlgebra.eigvals!(pm::PackedMatrix{R}, range::UnitRange) where {R<:Real} =
-    spevx!('N', 'I', 'U', pm.dim, pm.data, zero(R), zero(R), range.start, range.stop, -one(R))[1]
+    spevx!('N', 'I', packed_ulchar(pm), pm.dim, packed_unscale!(pm).data, zero(R), zero(R), range.start, range.stop,
+        -one(R))[1]
 eigmin!(pm::PackedMatrix) = eigvals!(pm, 1:1)[1]
 eigmax!(pm::PackedMatrix) = eigvals!(pm, pm.dim:pm.dim)[1]
 LinearAlgebra.eigmin(pm::PackedMatrix) = eigmin!(copy(pm))
 LinearAlgebra.eigmax(pm::PackedMatrix) = eigmax!(copy(pm))
 function LinearAlgebra.cholesky!(pm::PackedMatrix{R}, ::NoPivot = NoPivot(); shift::R = zero(R), check::Bool = true) where {R<:Real}
     if !iszero(shift)
-        i = 0
-        @inbounds @simd for j in 1:pm.dim
-            i += j
-            pm.data[i] += shift
+        for i in PackedDiagonalIterator(pm, 0)
+            @inbounds pm[i] += shift
         end
     end
-    C, info = pptrf!('U', pm.dim, pm.data)
-    check && checkpositivedefinite(info)
-    return Cholesky(PackedMatrix(pm.dim, C), 'U', info)
+    C, info = pptrf!(packed_ulchar(pm), pm.dim, packed_unscale!(pm).data)
+    check && LinearAlgebra.checkpositivedefinite(info)
+    return Cholesky(PackedMatrix(pm.dim, C, packed_isupper(pm) ? :U : :L), packed_ulchar(pm), info)
 end
-LinearAlgebra.isposdef(M::PackedMatrix{R}, tol::R=zero(R)) where {R<:Real} =
-    isposdef(cholesky!(copy(M), shift=tol, check=false))
+LinearAlgebra.isposdef(pm::PackedMatrix{R}, tol::R=zero(R)) where {R<:Real} =
+    isposdef(cholesky!(copy(pm), shift=tol, check=false))
 
-function rmul_offdiags!(M::PackedMatrix{R}, factor::R) where {R}
-    diags = PackedDiagonalIterator(M.dim, 0)
-    data = M.data
-    for (d₁, d₂) in zip(diags, Iterators.drop(diags, 1))
-        @inbounds rmul!(@view(data[d₁+1:d₂-1]), factor)
-    end
-    return M
-end
-function lmul_offdiags!(M::PackedMatrix{R}, factor::R) where {R}
-    diags = PackedDiagonalIterator(M.dim, 0)
-    data = M.data
-    for (d₁, d₂) in zip(diags, Iterators.drop(diags, 1))
-        @inbounds lmul!(@view(data[d₁+1:d₂-1]), factor)
-    end
-    return M
 end
