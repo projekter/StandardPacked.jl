@@ -263,6 +263,7 @@ function Base.similar(P::PackedMatrix{R}, ::Type{T}=eltype(P), dims::NTuple{2,In
 end
 LinearAlgebra.vec(P::PackedMatrix) = P.data
 Base.convert(T::Type{<:Ptr}, P::PackedMatrix) = convert(T, P.data)
+Base.unsafe_convert(T::Type{Ptr{R}}, P::PackedMatrix{R}) where {R} = Base.unsafe_convert(T, P.data)
 Base.reshape(P::PackedMatrix, ::Val{1}) = P.data # controversial? But it allows taking views with linear indices appropriately.
 
 # Broadcasting
@@ -756,7 +757,12 @@ LinearAlgebra.axpy!(a::Number, x::PackedMatrix, y::PackedMatrix) = LinearAlgebra
 
 # These are for multiplications where the matrix is directly interpreted as a vector.
 LinearAlgebra.mul!(C::PackedMatrix, A::AbstractMatrix, B::AbstractVector, α::Number, β::Number) = mul!(C.data, A, B, α, β)
+LinearAlgebra.mul!(C::PackedMatrix, A::AbstractMatrix, B::PackedMatrix, α::Number, β::Number) = mul!(C.data, A, B.data, α, β)
 LinearAlgebra.mul!(C::AbstractVector, A::AbstractMatrix, B::PackedMatrix, α::Number, β::Number) = mul!(C, A, B.data, α, β)
+# But we need to be very careful: if A above was a PackedMatrix, they all transform to Vector, PackedMatrix, Vector, which will
+# (potentially) call the mul! below that performs symmetric multiplication - which is not what should be done.
+LinearAlgebra.mul!(::Union{<:AbstractVector,PackedMatrix}, ::PackedMatrix, ::Union{<:AbstractVector,<:PackedMatrix}, ::Number,
+    ::Number) = throw(DimensionMismatch())
 # And this is the symmetric multiplication. BLAS only offers it for the packed format. So either we write a helper that
 # - allocates a copy and unscales it (bad - mul! shouldn't allocate) or
 # - unscales the matrix, multiplies and rescales (bad - floating point not necessarily reversible; not threadsafe)
