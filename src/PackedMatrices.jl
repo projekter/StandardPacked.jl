@@ -160,6 +160,7 @@ function PackedMatrix(P::PackedMatrix, format::Symbol=packed_format(P))
 end
 
 Base.size(P::PackedMatrix) = (P.dim, P.dim)
+LinearAlgebra.checksquare(P::PackedMatrix) = P.dim
 Base.eltype(::PackedMatrix{R}) where {R} = R
 Base.@propagate_inbounds Base.getindex(P::PackedMatrix, idx) = P.data[idx]
 Base.@propagate_inbounds Base.getindex(P::PackedMatrix{R,V,:U}, row, col) where {R,V} =
