@@ -1,8 +1,8 @@
 module PackedMatrices
 
 export PackedMatrix, PackedMatrixUpper, PackedMatrixLower, packed_isupper, packed_islower, packed_isscaled, packedsize,
-    rmul_offdiags!, lmul_offdiags!, packed_scale!, packed_unscale!, spev!, spevd!, spevx!, pptrf!, spmv!, spr!, tpttr!, trttp!,
-    gemmt!, eigmin!, eigmax!
+    rmul_diags!, rmul_offdiags!, lmul_diags!, lmul_offdiags!, packed_scale!, packed_unscale!, spev!, spevd!, spevx!, pptrf!,
+    spmv!, spr!, tpttr!, trttp!, gemmt!, eigmin!, eigmax!
 
 using LinearAlgebra, SparseArrays
 
@@ -112,11 +112,25 @@ function LinearAlgebra.tr(A::PackedMatrix{R}) where {R}
     return trace
 end
 
+function rmul_diags!(M::PackedMatrix{R}, factor::R) where {R}
+    data = M.data
+    for i in PackedDiagonalIterator(M, 0)
+        @inbounds data[i] = data[i] * factor
+    end
+    return M
+end
 function rmul_offdiags!(M::PackedMatrix{R}, factor::R) where {R}
     diags = PackedDiagonalIterator(M, 0)
     data = M.data
     for (d₁, d₂) in zip(diags, Iterators.drop(diags, 1))
         @inbounds rmul!(@view(data[d₁+1:d₂-1]), factor)
+    end
+    return M
+end
+function lmul_diags!(M::PackedMatrix{R}, factor::R) where {R}
+    data = M.data
+    for i in PackedDiagonalIterator(M, 0)
+        @inbounds data[i] = factor * data[i]
     end
     return M
 end
@@ -936,20 +950,48 @@ LinearAlgebra.normMinusInf(pm::PackedMatrixUnscaled) = LinearAlgebra.normMinusIn
 LinearAlgebra.normMinusInf(pm::PackedMatrixScaled{R}) where {R} = normapply((m, x, diag) -> min(m, abs(x)), pm, R(Inf))
 LinearAlgebra.normp(pm::PackedMatrix, p) = normapply((Σ, x, diag) -> Σ + (diag ? abs(x)^p : 2abs(x)^p), pm)^(1/p)
 
-LinearAlgebra.eigen!(pm::PackedMatrix{R}) where {R<:Real} =
-    Eigen(spevd!('V', packed_ulchar(pm), pm.dim, packed_unscale!(pm).data)...)
-LinearAlgebra.eigvals(pm::PackedMatrix{R}) where {R<:Real} =
-    spevd!('N', packed_ulchar(pm), pm.dim, PackedMatrix(pm, packed_isupper(pm) ? :U : :L).data)
-LinearAlgebra.eigen!(pm::PackedMatrix{R}, vl::R, vu::R) where {R<:Real} =
-    Eigen(spevx!('V', 'V', packed_ulchar(pm), pm.dim, packed_unscale!(pm).data, vl, vu, 0, 0, -one(R))...)
-LinearAlgebra.eigen!(pm::PackedMatrix{R}, range::UnitRange) where {R<:Real} =
-    Eigen(spevx!('V', 'I', packed_ulchar(pm), pm.dim, packed_unscale!(pm).data, zero(R), zero(R), range.start, range.stop,
-        -one(R))...)
-LinearAlgebra.eigvals!(pm::PackedMatrix{R}, vl::R, vu::R) where {R<:Real} =
-    spevx!('N', 'V', packed_ulchar(pm), pm.dim, packed_unscale!(pm).data, vl, vu, 0, 0, -one(R))[1]
-LinearAlgebra.eigvals!(pm::PackedMatrix{R}, range::UnitRange) where {R<:Real} =
-    spevx!('N', 'I', packed_ulchar(pm), pm.dim, packed_unscale!(pm).data, zero(R), zero(R), range.start, range.stop,
-        -one(R))[1]
+LinearAlgebra.eigen!(pm::PackedMatrixUnscaled{R}) where {R<:Real} =
+    Eigen(spevd!('V', packed_ulchar(pm), pm.dim, pm.data)...)
+function LinearAlgebra.eigen!(pm::PackedMatrixScaled{R}) where {R<:Real}
+    fac = sqrt(R(2))
+    eval, evec = spevd!('V', packed_ulchar(pm), pm.dim, rmul_diags!(pm, fac).data)
+    return Eigen(rmul!(eval, inv(fac)), evec)
+end
+LinearAlgebra.eigvals(pm::PackedMatrixUnscaled{R}) where {R<:Real} =
+    spevd!('N', packed_ulchar(pm), pm.dim, copy(pm.data))
+function LinearAlgebra.eigvals(pm::PackedMatrixScaled{R}) where {R<:Real}
+    fac = sqrt(R(2))
+    return rmul!(spevd!('N', packed_ulchar(pm), pm.dim, rmul_diags!(copy(pm), fac).data), inv(fac))
+end
+LinearAlgebra.eigen!(pm::PackedMatrixUnscaled{R}, vl::R, vu::R) where {R<:Real} =
+    Eigen(spevx!('V', 'V', packed_ulchar(pm), pm.dim, pm.data, vl, vu, 0, 0, -one(R))...)
+function LinearAlgebra.eigen!(pm::PackedMatrixScaled{R}, vl::R, vu::R) where {R<:Real}
+    fac = sqrt(R(2))
+    eval, evec = spevx!('V', 'V', packed_ulchar(pm), pm.dim, rmul_diags!(pm, fac).data, vl * fac, vu * fac, 0, 0, -one(R))
+    return Eigen(rmul!(eval, inv(fac)), evec)
+end
+LinearAlgebra.eigen!(pm::PackedMatrixUnscaled{R}, range::UnitRange) where {R<:Real} =
+    Eigen(spevx!('V', 'I', packed_ulchar(pm), pm.dim, pm.data, zero(R), zero(R), range.start, range.stop, -one(R))...)
+function LinearAlgebra.eigen!(pm::PackedMatrixScaled{R}, range::UnitRange) where {R<:Real}
+    fac = sqrt(R(2))
+    eval, evec = spevx!('V', 'I', packed_ulchar(pm), pm.dim, rmul_diags!(pm, fac).data, zero(R), zero(R), range.start,
+        range.stop, -one(R))
+    return Eigen(rmul!(eval, inv(fac)), evec)
+end
+LinearAlgebra.eigvals!(pm::PackedMatrixUnscaled{R}, vl::R, vu::R) where {R<:Real} =
+    spevx!('N', 'V', packed_ulchar(pm), pm.dim, pm.data, vl, vu, 0, 0, -one(R))[1]
+function LinearAlgebra.eigvals!(pm::PackedMatrixScaled{R}, vl::R, vu::R) where {R<:Real}
+    fac = sqrt(R(2))
+    return rmul!(spevx!('N', 'V', packed_ulchar(pm), pm.dim, rmul_diags!(pm, fac).data, vl * fac, vu * fac, 0, 0, -one(R))[1],
+        inv(fac))
+end
+LinearAlgebra.eigvals!(pm::PackedMatrixUnscaled{R}, range::UnitRange) where {R<:Real} =
+    spevx!('N', 'I', packed_ulchar(pm), pm.dim, pm.data, zero(R), zero(R), range.start, range.stop, -one(R))[1]
+function LinearAlgebra.eigvals!(pm::PackedMatrixScaled{R}, range::UnitRange) where {R<:Real}
+    fac = sqrt(R(2))
+    return rmul!(spevx!('N', 'I', packed_ulchar(pm), pm.dim, rmul_diags!(pm, fac).data, zero(R), zero(R), range.start,
+        range.stop, -one(R))[1], inv(fac))
+end
 eigmin!(pm::PackedMatrix) = eigvals!(pm, 1:1)[1]
 eigmax!(pm::PackedMatrix) = eigvals!(pm, pm.dim:pm.dim)[1]
 LinearAlgebra.eigmin(pm::PackedMatrix) = eigmin!(copy(pm))
