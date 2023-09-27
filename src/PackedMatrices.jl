@@ -362,19 +362,19 @@ for (spev, spevd, spevx, pptrf, spmv, spr, tpttr, trttp, gemmt, elty) in
         # *     ..
         # *     .. Array Arguments ..
         #       DOUBLE PRECISION   AP( * ), W( * ), WORK( * ), Z( LDZ, * )
-        function spev!(jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::AbstractVector{$elty})
+        function spev!(jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::AbstractVector{$elty};
+                       W::AbstractVector{$elty}=similar(AP, $elty, n),
+                       Z::AbstractMatrix{$elty}=similar(AP, $elty, ldz, jobz == 'N' ? 0 : n),
+                       work::AbstractVector{$elty}=Vector{$elty}(undef, 3n))
             BLAS.chkuplo(uplo)
-            LinearAlgebra.chkstride1(AP)
+            LinearAlgebra.chkstride1(AP, W, Z, work)
             chkpacked(n, AP)
-            W     = similar(AP, $elty, n)
-            work  = Vector{$elty}(undef, 3n)
+            length(W) ≥ n || throw(ArgumentError("The provided vector was too small"))
+            jobz == 'N' || (size(Z, 1) ≥ n && size(Z, 2) ≥ n) || throw(ArgumentError("The provided matrix was too small"))
+            ldz = stride(Z, 2)
+            ldz ≥ max(1, n) || throw(ArgumentError("The provided matrix had an invalid leading dimension"))
+            length(work) < 3n && throw(ArgumentError("The provided work space was too small"))
             info  = Ref{BLAS.BlasInt}()
-            ldz   = n
-            if jobz == 'N'
-                Z = similar(AP, $elty, ldz, 0)
-            else
-                Z = similar(AP, $elty, ldz, n)
-            end
             ccall((BLAS.@blasfunc($spev), BLAS.libblastrampoline), Cvoid,
                   (Ref{UInt8},        # JOBZ
                    Ref{UInt8},        # UPLO
@@ -403,9 +403,14 @@ for (spev, spevd, spevx, pptrf, spmv, spr, tpttr, trttp, gemmt, elty) in
         #       INTEGER            IFAIL( * ), IWORK( * )
         #       DOUBLE PRECISION   AP( * ), W( * ), WORK( * ), Z( LDZ, * )
         function spevx!(jobz::AbstractChar, range::AbstractChar, uplo::AbstractChar, n::Integer, AP::AbstractVector{$elty},
-                        vl::AbstractFloat, vu::AbstractFloat, il::Integer, iu::Integer, abstol::AbstractFloat)
+                        vl::AbstractFloat, vu::AbstractFloat, il::Integer, iu::Integer, abstol::AbstractFloat;
+                        W::AbstractVector{$elty}=similar(AP, $elty, n),
+                        Z::AbstractMatrix{$elty}=similar(AP, $elty, n, jobz == 'N' ? 0 : (range == 'I' ? iu-il+1 : n)),
+                        work::AbstractVector{$elty}=Vector{$elty}(undef, 8n),
+                        iwork::AbstractVector{BLAS.BlasInt}=Vector{BLAS.BlasInt}(undef, 5n),
+                        ifail::AbstractVector{BLAS.BlasInt}=Vector{BLAS.BlasInt}(undef, jobz == 'V' ? n : 0))
             BLAS.chkuplo(uplo)
-            LinearAlgebra.chkstride1(AP)
+            LinearAlgebra.chkstride1(AP, W, Z, work, iwork, ifail)
             chkpacked(n, AP)
             if range == 'I' && !(1 <= il <= iu <= n)
                 throw(ArgumentError("illegal choice of eigenvalue indices (il = $il, iu = $iu), which must be between 1 and n = $n"))
@@ -413,18 +418,17 @@ for (spev, spevd, spevx, pptrf, spmv, spr, tpttr, trttp, gemmt, elty) in
             if range == 'V' && vl >= vu
                 throw(ArgumentError("lower boundary, $vl, must be less than upper boundary, $vu"))
             end
+            length(W) ≥ n || throw(ArgumentError("The provided vector was too small"))
+            jobz == 'N' || (size(Z, 1) ≥ n &&
+                ((range == 'I' && size(Z, 2) ≥ iu-il+1) ||
+                    (range != 'I' && size(Z, 2) ≥ n))) || throw(ArgumentError("The provided matrix was too small"))
+            ldz = stride(Z, 2)
+            ldz ≥ max(1, n) || throw(ArgumentError("The provided matrix had an invalid leading dimension"))
+            length(work) < 8n && throw(ArgumentError("The provided work space was too small"))
+            length(iwork) < 5n && throw(ArgumentError("The provided iwork space was too small"))
+            jobz == 'V' && length(ifail) < n && throw(ArgumentError("The provided ifail space was too small"))
             m = Ref{BLAS.BlasInt}()
-            W = similar(AP, $elty, n)
-            ldz = n
-            if jobz == 'N'
-                Z = similar(AP, $elty, ldz, 0)
-            elseif jobz == 'V'
-                Z = similar(AP, $elty, ldz, n)
-            end
-            work   = Vector{$elty}(undef, 8n)
-            iwork  = Vector{BLAS.BlasInt}(undef, 5n)
-            ifail  = Vector{BLAS.BlasInt}(undef, n)
-            info   = Ref{BLAS.BlasInt}()
+            info = Ref{BLAS.BlasInt}()
             ccall((BLAS.@blasfunc($spevx), BLAS.libblastrampoline), Cvoid,
                   (Ref{UInt8},        # JOBZ
                    Ref{UInt8},        # RANGE
@@ -447,9 +451,11 @@ for (spev, spevd, spevx, pptrf, spmv, spr, tpttr, trttp, gemmt, elty) in
                    Clong,             # length(JOBZ)
                    Clong,             # length(RANGE)
                    Clong),            # length(UPLO)
-                jobz, range, uplo, n, AP, vl, vu, il, iu, abstol, m, W, Z, max(1, ldz), work, iwork, ifail, info, 1, 1, 1)
+                jobz, range, uplo, n, AP, vl, vu, il, iu, abstol, m, W, Z, ldz, work, iwork, ifail, info, 1, 1, 1)
             LAPACK.chklapackerror(info[])
-            W[1:m[]], Z[:,1:(jobz == 'V' ? m[] : 0)]
+            @view(W[1:m[]]), @view(Z[:, 1:(jobz == 'V' ? m[] : 0)])
+            # We return a view with all rows although Z it might be larger. But if we only go to 1:n, this changes the type of
+            # the view, so we are no longer type-stable...
         end
         spevx!(jobz::AbstractChar, n::Integer, A::AbstractVector{$elty}) =
             spevx!(jobz, 'A', 'U', n, A, 0.0, 0.0, 0, 0, -1.0)
@@ -463,47 +469,41 @@ for (spev, spevd, spevx, pptrf, spmv, spr, tpttr, trttp, gemmt, elty) in
         # *     .. Array Arguments ..
         # INTEGER            IWORK( * )
         # DOUBLE PRECISION   AP( * ), W( * ), WORK( * ), Z( LDZ, * )
-        function spevd!(jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::AbstractVector{$elty})
+        function spevd!(jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::AbstractVector{$elty};
+                        W::AbstractVector{$elty}=similar(AP, $elty, n),
+                        Z::AbstractMatrix{$elty}=similar(AP, $elty, n, jobz == 'N' ? 0 : n),
+                        work::AbstractVector{$elty}=Vector{$elty}(undef, n ≤ 1 ? 1 : (jobz == 'N' ? 2n : 1 + 6n + n^2)),
+                        iwork::AbstractVector{BLAS.BlasInt}=Vector{BLAS.BlasInt}(undef, jobz == 'N' || n ≤ 1 ? 1 : 3 + 5n))
             BLAS.chkuplo(uplo)
-            LinearAlgebra.chkstride1(AP)
+            LinearAlgebra.chkstride1(AP, W, Z, work, iwork)
             chkpacked(n, AP)
-            W      = similar(AP, $elty, n)
-            ldz    = n
-            if jobz == 'N'
-                Z = similar(AP, $elty, ldz, 0)
-            else
-                Z = similar(AP, $elty, ldz, n)
-            end
-            work   = Vector{$elty}(undef, 1)
-            lwork  = BLAS.BlasInt(-1)
-            iwork  = Vector{LinearAlgebra.BlasInt}(undef, 1)
-            liwork = BLAS.BlasInt(-1)
-            info   = Ref{BLAS.BlasInt}()
-            for i = 1:2  # first call returns lwork as work[1]
-                ccall((BLAS.@blasfunc($spevd), BLAS.libblastrampoline), Cvoid,
-                      (Ref{UInt8},        # JOBZ
-                       Ref{UInt8},        # UPLO
-                       Ref{BLAS.BlasInt}, # N
-                       Ptr{$elty},        # AP
-                       Ptr{$elty},        # W
-                       Ptr{$elty},        # Z
-                       Ref{BLAS.BlasInt}, # LDZ
-                       Ptr{$elty},        # WORK
-                       Ref{BLAS.BlasInt}, # LWORK
-                       Ptr{BLAS.BlasInt}, # IWORK
-                       Ref{BLAS.BlasInt}, # LIWORK
-                       Ptr{BLAS.BlasInt}, # INFO
-                       Clong,             # length(JOBZ)
-                       Clong),            # length(UPLO)
-                      jobz, uplo, n, AP, W, Z, ldz, work, lwork, iwork, liwork, info, 1, 1)
-                LAPACK.chklapackerror(info[])
-                if i == 1
-                    lwork = BLAS.BlasInt(work[1])
-                    resize!(work, lwork)
-                    liwork = BLAS.BlasInt(iwork[1])
-                    resize!(iwork, liwork)
-                end
-            end
+            length(W) ≥ n || throw(ArgumentError("The provided vector was too small"))
+            jobz == 'N' || size(Z, 2) ≥ n || throw(ArgumentError("The provided matrix was too small"))
+            lwork = BLAS.BlasInt(length(work))
+            lwork ≥ (n ≤ 1 ? 1 : (jobz == 'N' ? 2n : 1 + 6n + n^2)) ||
+            throw(ArgumentError("The provided work space was too small"))
+            liwork = BLAS.BlasInt(length(iwork))
+            liwork ≥ (jobz == 'N' || n ≤ 1 ? 1 : 3 + 5n) || throw(ArgumentError("The provided iwork space was too small"))
+            ldz = stride(Z, 2)
+            ldz ≥ max(1, n) || throw(ArgumentError("The provided matrix had an invalid leading dimension"))
+            info = Ref{BLAS.BlasInt}()
+            ccall((BLAS.@blasfunc($spevd), BLAS.libblastrampoline), Cvoid,
+                   (Ref{UInt8},        # JOBZ
+                    Ref{UInt8},        # UPLO
+                    Ref{BLAS.BlasInt}, # N
+                    Ptr{$elty},        # AP
+                    Ptr{$elty},        # W
+                    Ptr{$elty},        # Z
+                    Ref{BLAS.BlasInt}, # LDZ
+                    Ptr{$elty},        # WORK
+                    Ref{BLAS.BlasInt}, # LWORK
+                    Ptr{BLAS.BlasInt}, # IWORK
+                    Ref{BLAS.BlasInt}, # LIWORK
+                    Ptr{BLAS.BlasInt}, # INFO
+                    Clong,             # length(JOBZ)
+                    Clong),            # length(UPLO)
+                    jobz, uplo, n, AP, W, Z, ldz, work, lwork, iwork, liwork, info, 1, 1)
+            LAPACK.chklapackerror(info[])
             jobz == 'V' ? (W, Z) : W
         end
 
@@ -957,50 +957,52 @@ LinearAlgebra.normMinusInf(pm::PackedMatrixUnscaled) = LinearAlgebra.normMinusIn
 LinearAlgebra.normMinusInf(pm::PackedMatrixScaled{R}) where {R} = normapply((m, x, diag) -> min(m, abs(x)), pm, R(Inf))
 LinearAlgebra.normp(pm::PackedMatrix, p) = normapply((Σ, x, diag) -> Σ + (diag ? abs(x)^p : 2abs(x)^p), pm)^(1/p)
 
-LinearAlgebra.eigen!(pm::PackedMatrixUnscaled{R}) where {R<:Real} =
-    Eigen(spevd!('V', packed_ulchar(pm), pm.dim, pm.data)...)
-function LinearAlgebra.eigen!(pm::PackedMatrixScaled{R}) where {R<:Real}
+LinearAlgebra.eigen!(pm::PackedMatrixUnscaled{R}; kwargs...) where {R<:Real} =
+    Eigen(spevd!('V', packed_ulchar(pm), pm.dim, pm.data)...; kwargs...)
+function LinearAlgebra.eigen!(pm::PackedMatrixScaled{R}; kwargs...) where {R<:Real}
     fac = sqrt(R(2))
-    eval, evec = spevd!('V', packed_ulchar(pm), pm.dim, rmul_diags!(pm, fac).data)
+    eval, evec = spevd!('V', packed_ulchar(pm), pm.dim, rmul_diags!(pm, fac).data; kwargs...)
     return Eigen(rmul!(eval, inv(fac)), evec)
 end
-LinearAlgebra.eigvals(pm::PackedMatrixUnscaled{R}) where {R<:Real} =
-    spevd!('N', packed_ulchar(pm), pm.dim, copy(pm.data))
-function LinearAlgebra.eigvals(pm::PackedMatrixScaled{R}) where {R<:Real}
+LinearAlgebra.eigvals(pm::PackedMatrixUnscaled{R}; kwargs...) where {R<:Real} =
+    spevd!('N', packed_ulchar(pm), pm.dim, copy(pm.data); kwargs...)
+function LinearAlgebra.eigvals(pm::PackedMatrixScaled{R}; kwargs...) where {R<:Real}
     fac = sqrt(R(2))
-    return rmul!(spevd!('N', packed_ulchar(pm), pm.dim, rmul_diags!(copy(pm), fac).data), inv(fac))
+    return rmul!(spevd!('N', packed_ulchar(pm), pm.dim, rmul_diags!(copy(pm), fac).data; kwargs...), inv(fac))
 end
-LinearAlgebra.eigen!(pm::PackedMatrixUnscaled{R}, vl::R, vu::R) where {R<:Real} =
-    Eigen(spevx!('V', 'V', packed_ulchar(pm), pm.dim, pm.data, vl, vu, 0, 0, -one(R))...)
-function LinearAlgebra.eigen!(pm::PackedMatrixScaled{R}, vl::R, vu::R) where {R<:Real}
+LinearAlgebra.eigen!(pm::PackedMatrixUnscaled{R}, vl::R, vu::R; kwargs...) where {R<:Real} =
+    Eigen(spevx!('V', 'V', packed_ulchar(pm), pm.dim, pm.data, vl, vu, 0, 0, -one(R))...; kwargs...)
+function LinearAlgebra.eigen!(pm::PackedMatrixScaled{R}, vl::R, vu::R; kwargs...) where {R<:Real}
     fac = sqrt(R(2))
-    eval, evec = spevx!('V', 'V', packed_ulchar(pm), pm.dim, rmul_diags!(pm, fac).data, vl * fac, vu * fac, 0, 0, -one(R))
+    eval, evec = spevx!('V', 'V', packed_ulchar(pm), pm.dim, rmul_diags!(pm, fac).data, vl * fac, vu * fac, 0, 0, -one(R);
+        kwargs...)
     return Eigen(rmul!(eval, inv(fac)), evec)
 end
-LinearAlgebra.eigen!(pm::PackedMatrixUnscaled{R}, range::UnitRange) where {R<:Real} =
-    Eigen(spevx!('V', 'I', packed_ulchar(pm), pm.dim, pm.data, zero(R), zero(R), range.start, range.stop, -one(R))...)
-function LinearAlgebra.eigen!(pm::PackedMatrixScaled{R}, range::UnitRange) where {R<:Real}
+LinearAlgebra.eigen!(pm::PackedMatrixUnscaled{R}, range::UnitRange; kwargs...) where {R<:Real} =
+    Eigen(spevx!('V', 'I', packed_ulchar(pm), pm.dim, pm.data, zero(R), zero(R), range.start, range.stop, -one(R);
+        kwargs...)...)
+function LinearAlgebra.eigen!(pm::PackedMatrixScaled{R}, range::UnitRange; kwargs...) where {R<:Real}
     fac = sqrt(R(2))
     eval, evec = spevx!('V', 'I', packed_ulchar(pm), pm.dim, rmul_diags!(pm, fac).data, zero(R), zero(R), range.start,
-        range.stop, -one(R))
+        range.stop, -one(R); kwargs...)
     return Eigen(rmul!(eval, inv(fac)), evec)
 end
-LinearAlgebra.eigvals!(pm::PackedMatrixUnscaled{R}, vl::R, vu::R) where {R<:Real} =
-    spevx!('N', 'V', packed_ulchar(pm), pm.dim, pm.data, vl, vu, 0, 0, -one(R))[1]
-function LinearAlgebra.eigvals!(pm::PackedMatrixScaled{R}, vl::R, vu::R) where {R<:Real}
+LinearAlgebra.eigvals!(pm::PackedMatrixUnscaled{R}, vl::R, vu::R; kwargs...) where {R<:Real} =
+    spevx!('N', 'V', packed_ulchar(pm), pm.dim, pm.data, vl, vu, 0, 0, -one(R); kwargs...)[1]
+function LinearAlgebra.eigvals!(pm::PackedMatrixScaled{R}, vl::R, vu::R; kwargs...) where {R<:Real}
     fac = sqrt(R(2))
-    return rmul!(spevx!('N', 'V', packed_ulchar(pm), pm.dim, rmul_diags!(pm, fac).data, vl * fac, vu * fac, 0, 0, -one(R))[1],
-        inv(fac))
+    return rmul!(spevx!('N', 'V', packed_ulchar(pm), pm.dim, rmul_diags!(pm, fac).data, vl * fac, vu * fac, 0, 0, -one(R);
+        kwargs...)[1], inv(fac))
 end
-LinearAlgebra.eigvals!(pm::PackedMatrixUnscaled{R}, range::UnitRange) where {R<:Real} =
-    spevx!('N', 'I', packed_ulchar(pm), pm.dim, pm.data, zero(R), zero(R), range.start, range.stop, -one(R))[1]
-function LinearAlgebra.eigvals!(pm::PackedMatrixScaled{R}, range::UnitRange) where {R<:Real}
+LinearAlgebra.eigvals!(pm::PackedMatrixUnscaled{R}, range::UnitRange; kwargs...) where {R<:Real} =
+    spevx!('N', 'I', packed_ulchar(pm), pm.dim, pm.data, zero(R), zero(R), range.start, range.stop, -one(R); kwargs...)[1]
+function LinearAlgebra.eigvals!(pm::PackedMatrixScaled{R}, range::UnitRange; kwargs...) where {R<:Real}
     fac = sqrt(R(2))
     return rmul!(spevx!('N', 'I', packed_ulchar(pm), pm.dim, rmul_diags!(pm, fac).data, zero(R), zero(R), range.start,
-        range.stop, -one(R))[1], inv(fac))
+        range.stop, -one(R); kwargs...)[1], inv(fac))
 end
-eigmin!(pm::PackedMatrix) = eigvals!(pm, 1:1)[1]
-eigmax!(pm::PackedMatrix) = eigvals!(pm, pm.dim:pm.dim)[1]
+eigmin!(pm::PackedMatrix; kwargs...) = eigvals!(pm, 1:1; kwargs...)[1]
+eigmax!(pm::PackedMatrix; kwargs...) = eigvals!(pm, pm.dim:pm.dim; kwargs...)[1]
 LinearAlgebra.eigmin(pm::PackedMatrix) = eigmin!(copy(pm))
 LinearAlgebra.eigmax(pm::PackedMatrix) = eigmax!(copy(pm))
 function LinearAlgebra.cholesky!(pm::PackedMatrix{R}, ::NoPivot = NoPivot(); shift::R = zero(R), check::Bool = true) where {R<:Real}
