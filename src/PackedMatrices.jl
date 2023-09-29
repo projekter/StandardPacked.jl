@@ -56,6 +56,10 @@ struct PackedDiagonalIterator{Fmt}
     k::UInt
     PackedDiagonalIterator(P::PackedMatrixUpper, k) = new{:U}(P.dim, abs(k))
     PackedDiagonalIterator(P::PackedMatrixLower, k) = new{:L}(P.dim, abs(k))
+    function PackedDiagonalIterator(fmt::Symbol, dim, k)
+        fmt === :U || fmt === :L || error("Invalid symbol for diagonal iterator construction")
+        new{fmt}(dim, abs(k))
+    end
 end
 function Base.iterate(iter::PackedDiagonalIterator{:U})
     if iter.k ≥ iter.dim
