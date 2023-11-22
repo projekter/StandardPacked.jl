@@ -7,6 +7,5 @@ include("utils.jl")
 include("lapack.jl")
 include("linalg.jl")
 include("broadcasting.jl")
-include("linalg.jl")
 
 end
