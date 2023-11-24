@@ -6,5 +6,6 @@ makedocs(sitename="PackedMatrices.jl", modules=[PackedMatrices],
     pages=[
         "index.md",
         "reference.md",
+        "lapack.md"
     ],
     remotes=nothing)

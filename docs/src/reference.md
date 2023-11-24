@@ -36,6 +36,7 @@ setindex!
 vec(::PackedMatrix)
 Matrix{R}(::PackedMatrixUnscaled{R}) where {R}
 packedsize
+packedside
 ```
 
 ## Diagonal and off-diagonal elements
@@ -45,21 +46,6 @@ rmul_diags!
 rmul_offdiags!
 lmul_diags!
 lmul_offdiags!
-```
-
-## LAPACK wrappers
-Note that unless noted, these functions are only wrappers for real-valued LAPACK functions. No other data types than native
-single and double precision are therefore supported.
-```@docs
-spev!
-spevd!
-spevx!
-pptrf!
-spmv!
-spr!
-tpttr!
-trttp!
-gemmt!
 ```
 
 ## Extensions in LinearAlgebra
