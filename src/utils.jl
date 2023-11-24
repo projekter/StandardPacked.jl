@@ -1,18 +1,41 @@
-export packedsize, PackedDiagonalIterator, rmul_diags!, rmul_offdiags!, lmul_diags!, lmul_offdiags!
+export packedsize, packedside, PackedDiagonalIterator, rmul_diags!, rmul_offdiags!, lmul_diags!, lmul_offdiags!
 
 @doc raw"""
-    packedsize(dim)
+    packedsize(dim::Integer)
+    packedsize(A::AbstractMatrix)
 
-Calculates the number of unique entries in a symmetric matrix, ``\frac{\mathit{dim}(\mathit{dim} +1)}{2}``.
+Calculates the number of unique entries in a symmetric matrix `A` with side dimension `dim`,
+``\frac{\mathit{dim}(\mathit{dim} +1)}{2}``.
 """
-@inline packedsize(dim) = dim * (dim +1) ÷ 2
-chkpacked(n::Integer, AP::AbstractVector) = 2length(AP) == n * (n +1) ||
-    error("Packed storage length does not match dimension")
+@inline packedsize(dim::Integer) = dim * (dim +1) ÷ 2
+@inline packedsize(A::AbstractMatrix) = packedsize(LinearAlgebra.checksquare(A))
+chkpacked(n::Integer, fullsize::Integer) = 2fullsize == n * (n +1) || error("Packed storage length does not match dimension")
+@inline chkpacked(n::Integer, AP::AbstractVector) = chkpacked(n, length(AP))
+@inline chkpacked(n::Integer, P::PackedMatrix) = n == P.dim || error("Packed storage length does not match dimension")
+@doc raw"""
+    packedside(fullsize::Integer)
+    packedside(AP::AbstractVector)
 
-@inline rowcol_to_vec(P::PackedMatrixUpper, row, col) =
-    (@boundscheck(1 ≤ row ≤ col || throw(BoundsError(P, (row, col)))); return col * (col -1) ÷ 2 + row)
-@inline rowcol_to_vec(P::PackedMatrixLower, row, col) =
-    (@boundscheck(1 ≤ col ≤ row || throw(BoundsError(P, (row, col)))); return (2P.dim - col) * (col -1) ÷ 2 + row)
+Calculates the side dimension of a vector `AP` of size `fullside` representing a symmetric packed matrix,
+``\frac{\sqrt{8\mathit{fullsize} -1}}{2}``.
+"""
+@inline function packedside(fullsize::Integer)
+    n = (isqrt(8fullsize +1) -1) ÷ 2
+    @boundscheck(chkpacked(n, fullsize))
+    return n
+end
+Base.@propagate_inbounds packedside(AP::AbstractVector) = sidedim(length(AP))
+packedside(P::PackedMatrix) = P.dim
+
+
+@inline function rowcol_to_vec(P::PackedMatrixUpper, row, col)
+    @boundscheck(1 ≤ row ≤ col || throw(BoundsError(P, (row, col))))
+    return col * (col -1) ÷ 2 + row
+end
+@inline function rowcol_to_vec(P::PackedMatrixLower, row, col)
+    @boundscheck(1 ≤ col ≤ row || throw(BoundsError(P, (row, col))))
+    return (2P.dim - col) * (col -1) ÷ 2 + row
+end
 
 """
     PackedDiagonalIterator(P::PackedMatrix, k=0)

@@ -1,159 +1,221 @@
-export spev!, spevd!, spevx!, pptrf!, spmv!, spr!, tpttr!, trttp!, gemmt!
+using Base: require_one_based_indexing, _realtype
+using LinearAlgebra: libblastrampoline, BlasReal, BlasComplex, BlasFloat, BlasInt, DimensionMismatch, checksquare, chkstride1
+using LinearAlgebra.BLAS: @blasfunc, chkuplo
+import LinearAlgebra.BLAS: spmv!, hpmv!, spr!
+using LinearAlgebra.LAPACK: chklapackerror, chkfinite, chkargsok, chknonsingular
 
-for (spev, spevd, spevx, pptrf, spmv, spr, tpttr, trttp, gemmt, elty) in
-    ((:dspev_,:dspevd_,:dspevx_,:dpptrf_,:dspmv_,:dspr_,:dtpttr_,:dtrttp_,:dgemmt_,:Float64),
-     (:sspev_,:sspevd_,:sspevx_,:spptrf_,:sspmv_,:sspr_,:stpttr_,:strttp_,:sgemmt_,:Float32))
-     @eval begin
-        #       SUBROUTINE DSPEV( JOBZ, UPLO, N, AP, W, Z, LDZ, WORK, INFO )
+export spmv!, hpmv!, spr!, hpr!,
+    gemmt!,
+    trttp!, tpttr!, pptrf!, pptrs!, pptri!, spsv!, hpsv!, sptrf!, hptrf!, sptrs!, hptrs!, sptri!, hptri!, spev!, spevx!,
+        spevd!, spgv!, spgvx!, spgvd!, hptrd!, opgtr!, opmtr!
+
+# We implement all functions that are missing, if their corresponding dense counterparts are part of Base.
+# BLAS Level 2:
+# - Hermitian matrix-vector multiply:         sspmv,  dspmv,  chpmv,  zhpmv  (Base: spmv!, hpmv!)
+# - symmetric complex matrix-vector multiply:                 cspmv,  zspmv  (not implemented)
+# - triangular matrix-vector multiply:        stpmv,  dtpmv,  ctpmv,  ztpmv  (not implemented)
+# - rank-1 update:                            sspr,   dspr                   (Base: spr!)
+#                                                             chpr,   zhpr   (here: hpr!)
+# - symmetric complex rank-1 update:                          cspr,   zspr   (not implemented)
+# - rank-2 update:                            sspr2,  dspr2,  chpr2,  zhpr2  (not implemented)
+# - triangular solve:                         stpsv,  dtpsv,  ctpsv,  ztpsv  (not implemented)
+
+# BLAS Level 3:
+# - matrix-matrix product, triang. update:    sgemmt, dgemmt, cgemmt, zgemmt (here: gemmt!)
+
+# LAPACK
+# - conversion full to packed:                strttp, dtrttp, ctrttp, ztrttp (here: trttp!)
+# - conversion packed to full:                stpttr, dtpttr, ctpttr, ztpttr (here: tpttr!)
+# - Hermitian matrix norm:                    slansp, dlansp, clanhp, zlanhp (not implemented)
+# - symmetric complex matrix norm:                            clansp, zlansp (not implemented)
+# - triangular banded matrix norm:            slantb, dlantb, clantb, zlantb (not implemented)
+# - triangular packed matrix norm:            slantp, dlantp, clantp, zlantp (not implemented)
+# - Cholesky driver:                          sppsv,  dppsv,  cppsv,  zppsv  (not implemented)
+# - Cholesky expert driver:                   sppsvx, dppsvx, cppsvx, zppsvx (not implemented)
+# - Cholesky factorization:                   spptrf, dpptrf, cpptrf, zpptrf (here: pptrf!)
+# - Cholesky solver:                          spptrs, dpptrs, cpptrs, zpptrs (here: pptrs!)
+# - Cholesky inversion:                       spptri, dpptri, cpptri, zpptri (here: pptri!)
+# - Cholesky refinement:                      spprfs, dpprfs, cpprfs, zpprfs (not implemented)
+# - Cholesky condition number:                sppcon, dppcon, cppcon, zppcon (not implemented)
+# - Cholesky equilibration:                   sppequ, dppequ, cppequ, zppequ (not implemented)
+# - symmetric indefinite driver:              sspsv,  dspsv,  chpsv,  zhpsv  (here: spsv!, hpsv!)
+# - symmetric indefinite expert driver:       sspsvx, dspsvx, chpsvx, zhpsvx (not implemented)
+# - LDLᵀ factorization:                       ssptrf, dsptrf, chptrf, zhptrf (here: sptrf!, hptrf!)
+# - LDLᵀ solver:                              ssptrs, dsptrs, chptrs, zhptrs (here: sptrs!, hptrs!)
+# - LDLᵀ inversion:                           ssptri, dsptri, chptri, zhptri (here: sptri!, hptri!)
+# - LDLᵀ refinement:                          ssprfs, dsprf, csprfs, zsprfs  (not implemented)
+# - LDLᵀ condition number:                    sspcon, dspcon, chpcon, zhpcon (not implemented)
+# - symmetric complex indef solver:                           cspsv,  zspsv  (here: spsv!)
+# - symmetric complex indef expert solver:                    cspsvx, zspsvx (not implemented)
+# - LDLᵀ symmetric complex factorization:                     csptrf, zsptrf (here: sptrf!)
+# - LDLᵀ symmetric complex solver:                            csptrs, zsptrs (here: sptrs!)
+# - LDLᵀ symmetric complex inversion:                         csptri, zsptri (here: sptri!)
+# - LDLᵀ symmetric complex refinement:                        csprfs, zsprfs (not implemented)
+# - LDLᵀ symmetric complex condition number:                  cspcon, zspcon (not implemented)
+# - triangular solver:                        stptrs, dtptrs, ctptrs, ztptrs (not implemented)
+# - triangular solve carefully:               slatps, dlatps, clatps, zlatps (not implemented)
+# - triangular inversion:                     stptri, dtptri, ctptri, ztptri (not implemented)
+# - triangular refinement:                    stprfs, dtprfs, ctprfs, ztprfs (not implemented)
+# - triangular condition number:              stpcon, dtpcon, ctpcon, ztpcon (not implemented)
+# - eigenvalues:                              sspev,  dspev,  chpev,  zhpev  (here: spev!)
+# - eigenvalues, expert:                      sspevx, dspevx, chpevx, zhpevx (here: spevx!)
+# - eigenvalues, divide and conquer:          sspevd, dspevd, chpevd, zhpevd (here: spevd!)
+# - generalized eigenvalues:                  sspgv,  dspgv,  chpgv,  zhpgv  (here: spgv!)
+# - generalized eigenvalues, expert:          sspgvx, dspgvx, chpgvx, zhpgvx (here: spgvx!)
+# - generalized eigenvalues, divide&conquer:  sspgvd, dspgvd, chpgvd, zhpgvd (here: spgvd!)
+# - reduction to tridiagonal:                 ssptrd, dsptrd, chptrd, zhptrd (here: hptrd!)
+# - generate unitary after reduction:         sopgtr, dopgtr, cupgtr, zupgtr (here: opgtr!)
+# - multiply by matrix after reduction:       sopmtr, dopmtr, cupmtr, zupmtr (here: opmtr!)
+# - reduce generalized to standard form:      sspgst, dspgst, chpgst, zhpgst (not implemented)
+# - equilibrate:                              slaqsp, dlaqsp, claqhp, zlaqhp (not implemented)
+# - equilibrate symmetrix complex:                            claqsp, zlaqsp (not implemented)
+
+nameSH(::Type{<:Real}, realname::Symbol, ::Symbol) = realname
+nameSH(::Type{<:Complex}, ::Symbol, complexname::Symbol) = complexname
+
+const PtrOrVec{T} = Union{Ptr{T},<:AbstractVector{T}}
+const PtrOrMat{T} = Union{Ptr{T},<:AbstractMatrix{T}}
+const PtrOrVecOrMat{T} = Union{Ptr{T},<:AbstractVector{T},<:AbstractMatrix{T}}
+
+macro doublefun(name, arg)
+    sname = Symbol("s", name)
+    sfun = Symbol(sname, "!")
+    hname = Symbol("h", name)
+    hfun = Symbol(hname, "!")
+    esc(quote
+        for (f, blasf) in (($(QuoteNode(sfun)), @blasfunc($sname)),
+                           (isnothing($hname) ? () : (($(QuoteNode(hfun)), @blasfunc($hname)),))...)
+            @eval $arg
+        end
+    end)
+end
+
+macro doubledoc(name, arg)
+    sfun = Symbol("s", name, "!")
+    hfun = Symbol("h", name, "!")
+    esc(quote
+        for (f, T, field, typ, op, prefix) in (($(QuoteNode(sfun)), BlasFloat, "real or complex", "symmetric", "^\\top", "s"),
+                                               ($(QuoteNode(hfun)), BlasComplex, "complex", "Hermitian", "'", "h"))
+            fn = String(f)
+            @eval $arg
+        end
+    end)
+end
+
+spmv!(α::Real, AP::PackedMatrixUnscaled, args...) = spmv!(packed_ulchar(AP), α, vec(AP), args...)
+@doc replace(@doc(spmv!).meta[:results][1].text[1],
+    "    spmv!(uplo, α, AP, x, β, y)" => "    spmv!(uplo, α, AP::AbstractVector, x, β, y)
+    spmv!(α, AP::PackedMatrixUnscaled, x, β, y)") spmv!
+
+hpmv!(α::Number, AP::PackedMatrixUnscaled, args...) = hpmv!(packed_ulchar(AP), α, vec(AP), args...)
+@doc replace(@doc(spmv!).meta[:results][1].text[1],
+    "    hpmv!(uplo, α, AP, x, β, y)" => "    hpmv!(uplo, α, AP::AbstractVector, x, β, y)
+    hpmv!(α, AP::PackedMatrixUnscaled, x, β, y)") hpmv!
+
+spr!(α::Real, x::AbstractArray{T}, AP::PackedMatrixUnscaled{T}) where {T<:BlasReal} = spr!(packed_ulchar(AP), α, x, vec(AP))
+@doc replace(@doc(spr!).meta[:results][1].text[1],
+    "    spr!(uplo, α, x, AP)" => "    spr!(uplo, α, x, AP::AbstractVector)
+    spr!(α, x, AP::PackedMatrixUnscaled)") spr!
+
+for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv,    hpsv,    sptrf,    hptrf,    sptrs,    hptrs,    sptri,    hptri,   spev,   spevx,   spevd,   spgv,   spgvx,   spgvd,   hptrd,    opgtr,   opmtr,  elty) in
+   ((nothing, :sgemmt_, :strttp_, :stpttr_, :spptrf_, :spptrs_, :spptri_, :sspsv_, nothing, :ssptrf_, nothing,  :ssptrs_, nothing,  :ssptri_, nothing,  :spev_, :spevx_, :spevd_, :spgv_, :spgvx_, :spgvd_, :sptrd_, :soptr_, :sopmtr_, Float32),
+    (nothing, :dgemmt_, :dtrttp_, :dtpttr_, :dpptrf_, :dpptrs_, :dpptri_, :sspsv_, nothing, :dsptrf_, nothing,  :dsptrs_, nothing,  :dsptri_, nothing,  :dpev_, :dpevx_, :dpevd_, :dpgv_, :dpgvx_, :dpgvd_, :dptrd_, :doptr_, :dopmtr_, Float64),
+    (:chpr_,  :cgemmt_, :ctrttp_, :ctpttr_, :cpptrf_, :cpptrs_, :cpptri_, :cspsv_, :chpsv_, :csptrf_, :chptrf_, :csptrs_, :chptrs_, :csptri_, :chptri_, :cpev_, :cpevx_, :cpevd_, :cpgv_, :cpgvx_, :cpgvd_, :cptrd_, :coptr_, :copmtr_, ComplexF32),
+    (:zhpr_,  :zgemmt_, :ztrttp_, :ztpttr_, :zpptrf_, :zpptrs_, :zpptri_, :zspsv_, :zhpsv_, :zsptrf_, :zhptrf_, :zsptrs_, :zhptrs_, :zsptri_, :zhptri_, :zpev_, :zpevx_, :zpevd_, :zpgv_, :zpgvx_, :zpgvd_, :zptrd_, :zoptr_, :zopmtr_, ComplexF64))
+    isnothing(hpr) || @eval begin
+        # SUBROUTINE ZHPR(UPLO,N,ALPHA,X,INCX,AP)
+        # *       .. Scalar Arguments ..
+        # *       DOUBLE PRECISION ALPHA
+        # *       INTEGER INCX,N
+        # *       CHARACTER UPLO
+        # *       ..
+        # *       .. Array Arguments ..
+        # *       COMPLEX*16 AP(*),X(*)
+        function hpr!(uplo::AbstractChar, n::Integer, α::$elty, x::PtrOrVec{$elty}, incx::Integer, AP::PtrOrVec{$elty})
+            chkuplo(uplo)
+            @ccall libblastrampoline.$(@blasfunc(hpr))(
+                uplo::Ref{UInt8}, n::Ref{BlasInt}, α::Ref{$elty}, x::Ptr{$elty}, incx::Ref{BlasInt}, AP::Ptr{$elty}, 1::Clong
+            )::Cvoid
+            return AP
+        end
+    end
+    if BLAS.lbt_get_forward(@blasfunc(gemmt),
+        BLAS.USE_BLAS64 ? BLAS.LBT_INTERFACE_ILP64 : BLAS.LBT_INTERFACE_LP64) ∈ (BLAS.lbt_get_default_func(), Ptr{Cvoid}(-1))
+        @eval begin
+            # Not part of the reference BLAS (yet), but present in many implementations, also Julia 1.9
+            # Requires at least OpenBlas 0.3.22, but Julia currently maximally ships with 0.3.17. But with this construction, we
+            # make the function available anyway - just load MKL before this package. When the function is not found, the more
+            # inefficient gemm! is called.
+            function gemmt!(uplo::AbstractChar, transA::AbstractChar, transB::AbstractChar, alpha::Union{$elty,Bool},
+                A::AbstractVecOrMat{$elty}, B::AbstractVecOrMat{$elty}, beta::Union{$elty, Bool}, C::AbstractVecOrMat{$elty})
+                return BLAS.gemm!(transA, transB, alpha, A, B, beta, C)
+            end
+        end
+    else
+        @eval begin
+            # SUBROUTINE DGEMMT( UPLO, TRANSA, TRANSB, N, K, ALPHA, A, LDA, B, LDB, BETA, C, LDC)
+            #       .. Scalar Arguments ..
+            #       DOUBLE PRECISION ALPHA,BETA
+            #       INTEGER K,LDA,LDB,LDC,N
+            #       CHARACTER TRANSA,TRANSB, UPLO
+            #       ..
+            #       .. Array Arguments ..
+            #       DOUBLE PRECISION A(LDA,*),B(LDB,*),C(LDC,*)
+            function gemmt!(uplo::AbstractChar, transA::AbstractChar, transB::AbstractChar, alpha::Union{$elty,Bool},
+                A::AbstractVecOrMat{$elty}, B::AbstractVecOrMat{$elty}, beta::Union{$elty,Bool}, C::AbstractVecOrMat{$elty})
+                require_one_based_indexing(A, B, C)
+                chkuplo(uplo)
+                m = size(A, transA == 'N' ? 1 : 2)
+                ka = size(A, transA == 'N' ? 2 : 1)
+                kb = size(B, transB == 'N' ? 1 : 2)
+                n = size(B, transB == 'N' ? 2 : 1)
+                if ka != kb || m != checksquare(C) || n != m
+                    throw(DimensionMismatch(lazy"A has size ($m,$ka), B has size ($kb,$n), C has size $(size(C))"))
+                end
+                chkstride1(A, B, C)
+                @ccall libblastrampoline.$(@blasfunc(gemmt))(
+                    uplo::Ref{UInt8}, transA::Ref{UInt8}, transB::Ref{UInt8}, alpha::Ref{$elty}, A::Ptr{$elty},
+                    max(1, stride(A, 2))::Ref{BlasInt}, B::Ptr{$elty}, max(1, stride(B, 2))::Ref{BlasInt}, beta::Ref{$elty},
+                    C::Ptr{$elty}, max(1, stride(C, 2))::Ref{BlasInt}, 1::Clong, 1::Clong, 1::Clong
+                )::Cvoid
+                return C
+            end
+        end
+    end
+    @eval begin
+        # SUBROUTINE DTRTTP( UPLO, N, A, LDA, AP, INFO )
         # *     .. Scalar Arguments ..
-        #       CHARACTER          JOBZ, UPLO
-        #       INTEGER            INFO, LDZ, N
+        #       CHARACTER          UPLO
+        #       INTEGER            INFO, N, LDA
         # *     ..
         # *     .. Array Arguments ..
-        #       DOUBLE PRECISION   AP( * ), W( * ), WORK( * ), Z( LDZ, * )
-        function spev!(jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::AbstractVector{$elty},
-                       W::AbstractVector{$elty}=similar(AP, $elty, n),
-                       Z::AbstractMatrix{$elty}=similar(AP, $elty, ldz, jobz == 'N' ? 0 : n),
-                       work::AbstractVector{$elty}=Vector{$elty}(undef, 3n))
-            BLAS.chkuplo(uplo)
-            LinearAlgebra.chkstride1(AP, W, Z, work)
-            chkpacked(n, AP)
-            length(W) ≥ n || throw(ArgumentError("The provided vector was too small"))
-            jobz == 'N' || (size(Z, 1) ≥ n && size(Z, 2) ≥ n) || throw(ArgumentError("The provided matrix was too small"))
-            ldz = stride(Z, 2)
-            ldz ≥ max(1, n) || throw(ArgumentError("The provided matrix had an invalid leading dimension"))
-            length(work) < 3n && throw(ArgumentError("The provided work space was too small"))
-            info  = Ref{BLAS.BlasInt}()
-            ccall((BLAS.@blasfunc($spev), BLAS.libblastrampoline), Cvoid,
-                  (Ref{UInt8},        # JOBZ
-                   Ref{UInt8},        # UPLO
-                   Ref{BLAS.BlasInt}, # N
-                   Ptr{$elty},        # AP
-                   Ptr{$elty},        # W
-                   Ptr{$elty},        # Z
-                   Ref{BLAS.BlasInt}, # LDZ
-                   Ptr{$elty},        # WORK
-                   Ptr{BLAS.BlasInt}, # INFO
-                   Clong,             # length(JOBZ)
-                   Clong),            # length(UPLO)
-                jobz, uplo, n, AP, W, Z, ldz, work, info, 1, 1)
-            LAPACK.chklapackerror(info[])
-            jobz == 'V' ? (W, Z) : W
+        #       DOUBLE PRECISION   A( LDA, * ), AP( * )
+        function trttp!(uplo::AbstractChar, n::Integer, A::PtrOrMat{$elty}, lda::Integer, AP::PtrOrVec{$elty})
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(trttp))(
+                uplo::Ref{UInt8}, n::Ref{BlasInt}, A::Ptr{$elty}, lda::Ref{BlasInt}, AP::Ptr{$elty}, info::Ref{BlasInt}
+            )::Cvoid
+            chklapackerror(info[])
+            return AP
         end
 
-        #       SUBROUTINE DSPEVX( JOBZ, RANGE, UPLO, N, AP, VL, VU, IL, IU,
-        #      $                   ABSTOL, M, W, Z, LDZ, WORK, IWORK, IFAIL, INFO )
+        # SUBROUTINE DTPTTR( UPLO, N, AP, A, LDA, INFO )
         # *     .. Scalar Arguments ..
-        #       CHARACTER          JOBZ, RANGE, UPLO
-        #       INTEGER            IL, INFO, IU, LDZ, M, N
-        #       DOUBLE PRECISION   ABSTOL, VL, VU
+        #       CHARACTER          UPLO
+        #       INTEGER            INFO, N, LDA
         # *     ..
         # *     .. Array Arguments ..
-        #       INTEGER            IFAIL( * ), IWORK( * )
-        #       DOUBLE PRECISION   AP( * ), W( * ), WORK( * ), Z( LDZ, * )
-        function spevx!(jobz::AbstractChar, range::AbstractChar, uplo::AbstractChar, n::Integer, AP::AbstractVector{$elty},
-                        vl::AbstractFloat, vu::AbstractFloat, il::Integer, iu::Integer, abstol::AbstractFloat,
-                        W::AbstractVector{$elty}=similar(AP, $elty, n),
-                        Z::AbstractMatrix{$elty}=similar(AP, $elty, n, jobz == 'N' ? 0 : (range == 'I' ? iu-il+1 : n)),
-                        work::AbstractVector{$elty}=Vector{$elty}(undef, 8n),
-                        iwork::AbstractVector{BLAS.BlasInt}=Vector{BLAS.BlasInt}(undef, 5n),
-                        ifail::AbstractVector{BLAS.BlasInt}=Vector{BLAS.BlasInt}(undef, jobz == 'V' ? n : 0))
-            BLAS.chkuplo(uplo)
-            LinearAlgebra.chkstride1(AP, W, Z, work, iwork, ifail)
-            chkpacked(n, AP)
-            if range == 'I' && !(1 <= il <= iu <= n)
-                throw(ArgumentError("illegal choice of eigenvalue indices (il = $il, iu = $iu), which must be between 1 and n = $n"))
-            end
-            if range == 'V' && vl >= vu
-                throw(ArgumentError("lower boundary, $vl, must be less than upper boundary, $vu"))
-            end
-            length(W) ≥ n || throw(ArgumentError("The provided vector was too small"))
-            jobz == 'N' || (size(Z, 1) ≥ n &&
-                ((range == 'I' && size(Z, 2) ≥ iu-il+1) ||
-                    (range != 'I' && size(Z, 2) ≥ n))) || throw(ArgumentError("The provided matrix was too small"))
-            ldz = stride(Z, 2)
-            ldz ≥ max(1, n) || throw(ArgumentError("The provided matrix had an invalid leading dimension"))
-            length(work) < 8n && throw(ArgumentError("The provided work space was too small"))
-            length(iwork) < 5n && throw(ArgumentError("The provided iwork space was too small"))
-            jobz == 'V' && length(ifail) < n && throw(ArgumentError("The provided ifail space was too small"))
-            m = Ref{BLAS.BlasInt}()
-            info = Ref{BLAS.BlasInt}()
-            ccall((BLAS.@blasfunc($spevx), BLAS.libblastrampoline), Cvoid,
-                  (Ref{UInt8},        # JOBZ
-                   Ref{UInt8},        # RANGE
-                   Ref{UInt8},        # UPLO
-                   Ref{BLAS.BlasInt}, # N
-                   Ptr{$elty},        # AP
-                   Ref{$elty},        # VL
-                   Ref{$elty},        # VU
-                   Ref{BLAS.BlasInt}, # IL
-                   Ref{BLAS.BlasInt}, # IU
-                   Ref{$elty},        # ABSTOL
-                   Ptr{BLAS.BlasInt}, # M
-                   Ptr{$elty},        # W
-                   Ptr{$elty},        # Z
-                   Ref{BLAS.BlasInt}, # LDZ
-                   Ptr{$elty},        # WORK
-                   Ptr{BLAS.BlasInt}, # IWORK
-                   Ptr{BLAS.BlasInt}, # IFAIL
-                   Ptr{BLAS.BlasInt}, # INFO
-                   Clong,             # length(JOBZ)
-                   Clong,             # length(RANGE)
-                   Clong),            # length(UPLO)
-                jobz, range, uplo, n, AP, vl, vu, il, iu, abstol, m, W, Z, ldz, work, iwork, ifail, info, 1, 1, 1)
-            LAPACK.chklapackerror(info[])
-            @view(W[1:m[]]), @view(Z[:, 1:(jobz == 'V' ? m[] : 0)])
-            # We return a view with all rows although Z it might be larger. But if we only go to 1:n, this changes the type of
-            # the view, so we are no longer type-stable...
-        end
-        spevx!(jobz::AbstractChar, n::Integer, A::AbstractVector{$elty}) =
-            spevx!(jobz, 'A', 'U', n, A, 0.0, 0.0, 0, 0, -1.0)
-
-        #           SUBROUTINE DSPEVD( JOBZ, UPLO, N, AP, W, Z, LDZ, WORK,
-        #      $                   LWORK, IWORK, LIWORK, INFO )
-        # *     .. Scalar Arguments ..
-        # CHARACTER          JOBZ, UPLO
-        # INTEGER            INFO, LDZ, LIWORK, LWORK, N
-        # *     ..
-        # *     .. Array Arguments ..
-        # INTEGER            IWORK( * )
-        # DOUBLE PRECISION   AP( * ), W( * ), WORK( * ), Z( LDZ, * )
-        function spevd!(jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::AbstractVector{$elty},
-                        W::AbstractVector{$elty}=similar(AP, $elty, n),
-                        Z::AbstractMatrix{$elty}=similar(AP, $elty, n, jobz == 'N' ? 0 : n),
-                        work::AbstractVector{$elty}=Vector{$elty}(undef, n ≤ 1 ? 1 : (jobz == 'N' ? 2n : 1 + 6n + n^2)),
-                        iwork::AbstractVector{BLAS.BlasInt}=Vector{BLAS.BlasInt}(undef, jobz == 'N' || n ≤ 1 ? 1 : 3 + 5n))
-            BLAS.chkuplo(uplo)
-            LinearAlgebra.chkstride1(AP, W, Z, work, iwork)
-            chkpacked(n, AP)
-            length(W) ≥ n || throw(ArgumentError("The provided vector was too small"))
-            jobz == 'N' || size(Z, 2) ≥ n || throw(ArgumentError("The provided matrix was too small"))
-            lwork = BLAS.BlasInt(length(work))
-            lwork ≥ (n ≤ 1 ? 1 : (jobz == 'N' ? 2n : 1 + 6n + n^2)) ||
-            throw(ArgumentError("The provided work space was too small"))
-            liwork = BLAS.BlasInt(length(iwork))
-            liwork ≥ (jobz == 'N' || n ≤ 1 ? 1 : 3 + 5n) || throw(ArgumentError("The provided iwork space was too small"))
-            ldz = stride(Z, 2)
-            ldz ≥ max(1, n) || throw(ArgumentError("The provided matrix had an invalid leading dimension"))
-            info = Ref{BLAS.BlasInt}()
-            ccall((BLAS.@blasfunc($spevd), BLAS.libblastrampoline), Cvoid,
-                   (Ref{UInt8},        # JOBZ
-                    Ref{UInt8},        # UPLO
-                    Ref{BLAS.BlasInt}, # N
-                    Ptr{$elty},        # AP
-                    Ptr{$elty},        # W
-                    Ptr{$elty},        # Z
-                    Ref{BLAS.BlasInt}, # LDZ
-                    Ptr{$elty},        # WORK
-                    Ref{BLAS.BlasInt}, # LWORK
-                    Ptr{BLAS.BlasInt}, # IWORK
-                    Ref{BLAS.BlasInt}, # LIWORK
-                    Ptr{BLAS.BlasInt}, # INFO
-                    Clong,             # length(JOBZ)
-                    Clong),            # length(UPLO)
-                    jobz, uplo, n, AP, W, Z, ldz, work, lwork, iwork, liwork, info, 1, 1)
-            LAPACK.chklapackerror(info[])
-            jobz == 'V' ? (W, Z) : W
+        #       DOUBLE PRECISION   A( LDA, * ), AP( * )
+        function tpttr!(uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty}, A::PtrOrMat{$elty}, lda::Integer)
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(tpttr))(
+                uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, A::Ptr{$elty}, lda::Ref{BlasInt}, info::Ref{BlasInt},
+                1::Clong
+            )::Cvoid
+            chklapackerror(info[])
+            return A
         end
 
         # SUBROUTINE DPPTRF( UPLO, N, AP, INFO )
@@ -163,263 +225,634 @@ for (spev, spevd, spevx, pptrf, spmv, spr, tpttr, trttp, gemmt, elty) in
         # *     ..
         # *     .. Array Arguments ..
         #       DOUBLE PRECISION   AP( * )
-        function pptrf!(uplo::AbstractChar, n::Integer, AP::AbstractVector{$elty})
-            LinearAlgebra.require_one_based_indexing(AP)
-            LinearAlgebra.chkstride1(AP)
-            BLAS.chkuplo(uplo)
-            chkpacked(n, AP)
-            info = Ref{BLAS.BlasInt}()
-            ccall((BLAS.@blasfunc($pptrf), BLAS.libblastrampoline), Cvoid,
-                  (Ref{UInt8},        # UPLO
-                   Ref{BLAS.BlasInt}, # N
-                   Ptr{$elty},        # AP
-                   Ptr{BLAS.BlasInt}, # INFO
-                   Clong),            # length(UPLO)
-                  uplo, n, AP, info, 1)
-            LAPACK.chkargsok(info[])
+        function pptrf!(uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty})
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(pptrf))(
+                uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, info::Ref{BlasInt}, 1::Clong
+            )::Cvoid
+            chkargsok(info[])
             #info[] > 0 means the leading minor of order info[] is not positive definite
             #ordinarily, throw Exception here, but return error code here
             #this simplifies isposdef! and factorize
             return AP, info[] # info stored in Cholesky
         end
 
-        #           SUBROUTINE DSPMV( UPLO, N, ALPHA, AP, X, INCX, BETA, Y, INCY )
-        # *     .. Scalar Arguments ..
-        #         DOUBLE PRECISION ALPHA,BETA
-        #         INTEGER INCX,INCY,N
-        #         CHARACTER UPLO
-        #   *     ..
-        #   *     .. Array Arguments ..
-        #         DOUBLE PRECISION AP(*),X(*),Y(*)
-        function spmv!(uplo::AbstractChar, α::Union{$elty,Bool}, AP::AbstractVector{$elty}, x::AbstractVector{$elty},
-                       β::Union{$elty,Bool}, y::AbstractVector{$elty})
-            BLAS.chkuplo(uplo)
-            LinearAlgebra.chkstride1(AP)
-            LinearAlgebra.require_one_based_indexing(AP, x, y)
-            n = length(x)
-            length(y) == n || ArgumentError("Input and output dimensions must match")
-            chkpacked(n, AP)
-            px, stx = BLAS.vec_pointer_stride(x, ArgumentError("input vector with 0 stride is not allowed"))
-            py, sty = BLAS.vec_pointer_stride(y, ArgumentError("dest vector with 0 stride is not allowed"))
-            GC.@preserve x AP ccall((BLAS.@blasfunc($spmv), BLAS.libblastrampoline), Cvoid,
-                (Ref{UInt8},        # UPLO
-                 Ref{BLAS.BlasInt}, # N
-                 Ref{$elty},        # ALPHA
-                 Ptr{$elty},        # AP
-                 Ptr{$elty},        # X
-                 Ref{BLAS.BlasInt}, # INCX
-                 Ref{$elty},        # BETA
-                 Ptr{$elty},        # Y
-                 Ref{BLAS.BlasInt}, # INCY
-                 Clong),            # length(UPLO)
-                uplo, n, α, AP, px, stx, β, py, sty, 1)
-            return y
-        end
-
-        #           SUBROUTINE DSPR( UPLO, N, ALPHA, X, INCX, AP )
-        # *     .. Scalar Arguments ..
-        #       DOUBLE PRECISION ALPHA
-        #       INTEGER INCX,N
-        #       CHARACTER UPLO
-        # *     ..
-        # *     .. Array Arguments ..
-        #       DOUBLE PRECISION AP(*),X(*)
-        function spr!(uplo::AbstractChar, α::$elty, x::AbstractVector{$elty}, AP::AbstractVector{$elty})
-            BLAS.chkuplo(uplo)
-            LinearAlgebra.chkstride1(AP)
-            LinearAlgebra.require_one_based_indexing(AP, x)
-            n = length(x)
-            chkpacked(n, AP)
-            px, stx = BLAS.vec_pointer_stride(x, ArgumentError("input vector with 0 stride is not allowed"))
-            GC.@preserve x ccall((BLAS.@blasfunc($spr), BLAS.libblastrampoline), Cvoid,
-                (Ref{UInt8},        # UPLO
-                 Ref{BLAS.BlasInt}, # N
-                 Ref{$elty},        # ALPHA
-                 Ptr{$elty},        # X
-                 Ref{BLAS.BlasInt}, # INCX
-                 Ptr{$elty},        # AP
-                 Clong),            # length(UPLO)
-                uplo, n, α, px, stx, AP, 1)
-            return AP
-        end
-
-        #           SUBROUTINE DTPTTR( UPLO, N, AP, A, LDA, INFO )
+        # SUBROUTINE DPPTRS( UPLO, N, NRHS, AP, B, LDB, INFO )
         # *     .. Scalar Arguments ..
         #       CHARACTER          UPLO
-        #       INTEGER            INFO, N, LDA
+        #       INTEGER            INFO, LDB, N, NRHS
         # *     ..
         # *     .. Array Arguments ..
-        #       DOUBLE PRECISION   A( LDA, * ), AP( * )
-        function tpttr!(uplo::AbstractChar, AP::AbstractVector{$elty}, A::StridedArray{$elty})
-            BLAS.chkuplo(uplo)
-            LinearAlgebra.chkstride1(AP)
-            LinearAlgebra.require_one_based_indexing(AP, A)
-            n = LinearAlgebra.checksquare(A)
-            chkpacked(n, AP)
-            lda = Base.stride(A, 2)
-            info = Ref{BLAS.BlasInt}()
-            ccall((BLAS.@blasfunc($tpttr), BLAS.libblastrampoline), Cvoid,
-                (Ref{UInt8},        # UPLO
-                 Ref{BLAS.BlasInt}, # N
-                 Ptr{$elty},        # AP
-                 Ptr{$elty},        # A
-                 Ref{BLAS.BlasInt}, # LDA
-                 Ptr{BLAS.BlasInt}, # INFO
-                 Clong),            # length(UPLO)
-                uplo, n, AP, A, lda, info, 1)
-            LAPACK.chklapackerror(info[])
-            return A
+        #       DOUBLE PRECISION   AP( * ), B( LDB, * )
+        function pptrs!(uplo::AbstractChar, n::Integer, nrhs::Integer, AP::PtrOrVec{$elty}, B::PtrOrVecOrMat{$elty},
+            ldb::Integer)
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(pptrs))(
+                uplo::Ref{UInt8}, n::Ref{BlasInt}, nrhs::Ref{BlasInt}, AP::Ptr{$elty}, B::Ptr{$elty}, ldb::Ref{BlasInt},
+                info::Ref{BlasInt}, 1::Clong
+            )::Cvoid
+            chklapackerror(info[])
+            return B
         end
 
-        #           SUBROUTINE DTRTTP( UPLO, N, A, LDA, AP, INFO )
+        # SUBROUTINE DPPTRI( UPLO, N, AP, INFO )
         # *     .. Scalar Arguments ..
         #       CHARACTER          UPLO
-        #       INTEGER            INFO, N, LDA
+        #       INTEGER            INFO, N
         # *     ..
         # *     .. Array Arguments ..
-        #       DOUBLE PRECISION   A( LDA, * ), AP( * )
-        function trttp!(uplo::AbstractChar, A::StridedArray{$elty}, AP::AbstractVector{$elty})
-            BLAS.chkuplo(uplo)
-            LinearAlgebra.chkstride1(AP)
-            LinearAlgebra.require_one_based_indexing(AP, A)
-            n = LinearAlgebra.checksquare(A)
-            chkpacked(n, AP)
-            lda = Base.stride(A, 2)
-            info = Ref{BLAS.BlasInt}()
-            ccall((BLAS.@blasfunc($trttp), BLAS.libblastrampoline), Cvoid,
-                (Ref{UInt8},        # UPLO
-                 Ref{BLAS.BlasInt}, # N
-                 Ptr{$elty},        # A
-                 Ref{BLAS.BlasInt}, # LDA
-                 Ptr{$elty},        # AP
-                 Ptr{BLAS.BlasInt}, # INFO
-                 Clong),            # length(UPLO)
-                uplo, n, A, lda, AP, info, 1)
-            LAPACK.chklapackerror(info[])
+        #       DOUBLE PRECISION   AP( * )
+        function pptri!(uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty})
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(pptri))(
+                uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, info::Ref{BlasInt}, 1::Clong
+            )::Cvoid
+            chkargsok(info[])
+            checknonsingular(info[])
             return AP
         end
+    end
+    @doublefun psv begin
+        # SUBROUTINE DSPSV( UPLO, N, NRHS, AP, IPIV, B, LDB, INFO )
+        # *     .. Scalar Arguments ..
+        #       CHARACTER          UPLO
+        #       INTEGER            INFO, LDB, N, NRHS
+        # *     ..
+        # *     .. Array Arguments ..
+        #       INTEGER            IPIV( * )
+        #       DOUBLE PRECISION   AP( * ), B( LDB, * )
+        function $f(uplo::AbstractChar, n::Integer, nrhs::Integer, AP::PtrOrVec{$elty}, ipiv::PtrOrVec{BlasInt},
+            B::PtrOrMat{$elty}, ldb::Integer)
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$blasf(
+                uplo::Ref{UInt8}, n::Ref{BlasInt}, nrhs::Ref{BlasInt}, AP::Ptr{$elty}, ipiv::Ptr{BlasInt}, B::Ptr{$elty},
+                ldb::Ref{BlasInt}, info::Ref{BlasInt}, 1::Clong
+            )::Cvoid
+            chklapackerror(info[])
+            return B, AP, ipiv
+        end
+    end
+    @doublefun ptrf begin
+        # SUBROUTINE DSPTRF( UPLO, N, AP, IPIV, INFO )
+        # *     .. Scalar Arguments ..
+        #       CHARACTER          UPLO
+        #       INTEGER            INFO, N
+        # *     ..
+        # *     .. Array Arguments ..
+        #       INTEGER            IPIV( * )
+        #       DOUBLE PRECISION   AP( * )
+        function $f(uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty}, ipiv::PtrOrVec{BlasInt})
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$blasf(
+                uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, ipiv::Ptr{BlasInt}, info::Ref{BlasInt}, 1::Clong
+            )::Cvoid
+            chkargsok(info[])
+            return AP, ipiv, info[]
+        end
+    end
+    @doublefun ptrs begin
+        # SUBROUTINE DSPTRS( UPLO, N, NRHS, AP, IPIV, B, LDB, INFO )
+        # *     .. Scalar Arguments ..
+        #       CHARACTER          UPLO
+        #       INTEGER            INFO, LDB, N, NRHS
+        # *     ..
+        # *     .. Array Arguments ..
+        #       INTEGER            IPIV( * )
+        #       DOUBLE PRECISION   AP( * ), B( LDB, * )
+        function $f(uplo::AbstractChar, n::Integer, nrhs::Integer, AP::PtrOrVec{$elty}, ipiv::PtrOrVec{BlasInt},
+            B::PtrOrMat{$elty}, ldb::Integer)
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$blasf(
+                uplo::Ref{UInt8}, n::Ref{BlasInt}, nrhs::Ref{BlasInt}, AP::Ptr{$elty}, ipiv::Ptr{BlasInt}, B::Ptr{$elty},
+                ldb::Ref{BlasInt}, info::Ref{BlasInt}, 1::Clong
+            )::Cvoid
+            chklapackerror(info[])
+            return B
+        end
+    end
+    @doublefun ptri begin
+        # SUBROUTINE DSPTRI( UPLO, N, AP, IPIV, WORK, INFO )
+        # *     .. Scalar Arguments ..
+        #       CHARACTER          UPLO
+        #       INTEGER            INFO, N
+        # *     ..
+        # *     .. Array Arguments ..
+        #       INTEGER            IPIV( * )
+        #       DOUBLE PRECISION   AP( * ), WORK( * )
+        function $f(uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty}, ipiv::PtrOrVec{BlasInt}, work::PtrOrVec{$elty})
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$blasf(
+                uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, ipiv::Ptr{BlasInt}, work::Ptr{$elty}, info::Ref{BlasInt},
+                1::Clong
+            )::Cvoid
+            chklapackerror(info[])
+            return AP
+        end
+    end
+    elty <: Real && @eval begin
+        # SUBROUTINE DSPEV( JOBZ, UPLO, N, AP, W, Z, LDZ, WORK, INFO )
+        # *     .. Scalar Arguments ..
+        #       CHARACTER          JOBZ, UPLO
+        #       INTEGER            INFO, LDZ, N
+        # *     ..
+        # *     .. Array Arguments ..
+        #       DOUBLE PRECISION   AP( * ), W( * ), WORK( * ), Z( LDZ, * )
+        function spev!(jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty}, W::PtrOrVec{$elty},
+            Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty})
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(spev))(
+                jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, W::Ptr{$elty}, Z::Ptr{$elty},
+                ldz::Ref{BlasInt}, work::Ptr{$elty}, info::Ref{BlasInt}, 1::Clong, 1::Clong
+            )::Cvoid
+            chklapackerror(info[])
+            return W, Z
+        end
 
-        # Not part of the reference BLAS (yet), but present in many implementations, also Julia 1.9
-        # Requires at least OpenBlas 0.3.22, but Julia currently maximally ships with 0.3.17. But with this construction, we
-        # make the function available anyway - just load MKL before this package. When the function is not found, the more
-        # inefficient gemm! is called.
-        #           SUBROUTINE DGEMMT( UPLO, TRANSA, TRANSB, N, K, ALPHA, A, LDA, B, LDB, BETA, C, LDC)
-        #       .. Scalar Arguments ..
-        #       DOUBLE PRECISION ALPHA,BETA
-        #       INTEGER K,LDA,LDB,LDC,N
-        #       CHARACTER TRANSA,TRANSB, UPLO
-        #       ..
-        #       .. Array Arguments ..
-        #       DOUBLE PRECISION A(LDA,*),B(LDB,*),C(LDC,*)
-        if BLAS.lbt_get_forward(BLAS.@blasfunc($gemmt),
-            BLAS.USE_BLAS64 ? BLAS.LBT_INTERFACE_ILP64 : BLAS.LBT_INTERFACE_LP64) ∈ (BLAS.lbt_get_default_func(), Ptr{Cvoid}(-1))
-            function gemmt!(uplo::AbstractChar, transA::AbstractChar, transB::AbstractChar, alpha::Union{($elty), Bool},
-                A::AbstractVecOrMat{$elty}, B::AbstractVecOrMat{$elty}, beta::Union{($elty), Bool},
-                C::AbstractVecOrMat{$elty})
-                return BLAS.gemm!(transA, transB, alpha, A, B, beta, C)
-            end
-        else
-            function gemmt!(uplo::AbstractChar, transA::AbstractChar, transB::AbstractChar, alpha::Union{($elty), Bool},
-                            A::AbstractVecOrMat{$elty}, B::AbstractVecOrMat{$elty}, beta::Union{($elty), Bool},
-                            C::AbstractVecOrMat{$elty})
-                LinearAlgebra.require_one_based_indexing(A, B, C)
-                BLAS.chkuplo(uplo)
-                m = size(A, transA == 'N' ? 1 : 2)
-                ka = size(A, transA == 'N' ? 2 : 1)
-                kb = size(B, transB == 'N' ? 1 : 2)
-                n = size(B, transB == 'N' ? 2 : 1)
-                if ka != kb || m != LinearAlgebra.checksquare(C) || n != m
-                    throw(DimensionMismatch(lazy"A has size ($m,$ka), B has size ($kb,$n), C has size $(size(C))"))
-                end
-                LinearAlgebra.chkstride1(A)
-                LinearAlgebra.chkstride1(B)
-                LinearAlgebra.chkstride1(C)
-                ccall((BLAS.@blasfunc($gemmt), BLAS.libblastrampoline), Cvoid,
-                    (Ref{UInt8},        # UPLO
-                    Ref{UInt8},        # TRANSA
-                    Ref{UInt8},        # TRANSB
-                    Ref{BLAS.BlasInt}, # N
-                    Ref{BLAS.BlasInt}, # K
-                    Ref{$elty},        # ALPHA
-                    Ptr{$elty},        # A
-                    Ref{BLAS.BlasInt}, # LDA
-                    Ptr{$elty},         # B
-                    Ref{BLAS.BlasInt}, # LDB
-                    Ref{$elty},        # BETA
-                    Ptr{$elty},        # C
-                    Ref{BLAS.BlasInt}, # LDC
-                    Clong,             # length(UPLO)
-                    Clong,             # length(TRANSA)
-                    Clong,             # length(TRANSB)
-                    ),
-                    uplo, transA, transB, n, ka, alpha, A, max(1, Base.stride(A, 2)), B, max(1, Base.stride(B,2)), beta, C,
-                    max(1, Base.stride(C, 2)), 1, 1, 1)
-                C
-            end
+        # SUBROUTINE DSPEVX( JOBZ, RANGE, UPLO, N, AP, VL, VU, IL, IU, ABSTOL, M, W, Z, LDZ, WORK, IWORK, IFAIL, INFO )
+        #    *     .. Scalar Arguments ..
+        #          CHARACTER          JOBZ, RANGE, UPLO
+        #          INTEGER            IL, INFO, IU, LDZ, M, N
+        #          DOUBLE PRECISION   ABSTOL, VL, VU
+        #    *     ..
+        #    *     .. Array Arguments ..
+        #          INTEGER            IFAIL( * ), IWORK( * )
+        #          DOUBLE PRECISION   AP( * ), W( * ), WORK( * ), Z( LDZ, * )
+        function spevx!(jobz::AbstractChar, range::AbstractChar, uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty},
+                vl::Union{Nothing,$elty}, vu::Union{Nothing,$elty}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer},
+                abstol::$elty, m::Integer, W::PtrOrVec{$elty}, Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty},
+                iwork::PtrOrVec{BlasInt}, ifail::PtrOrVec{BlasInt})
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(spevx))(
+                jobz::Ref{UInt8}, range::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty},
+                (isnothing(vl) ? C_NULL : Ref(vl))::Ptr{$elty},
+                (isnothing(vu) ? C_NULL : Ref(vu))::Ptr{$elty},
+                (isnothing(il) ? C_NULL : Ref(BlasInt(il)))::Ptr{BlasInt},
+                (isnothing(iu) ? C_NULL : Ref(BlasInt(iu)))::Ptr{BlasInt},
+                abstol::Ref{$elty}, m::Ref{BlasInt}, W::Ptr{$elty}, Z::Ptr{$elty}, ldz::Ref{BlasInt}, work::Ptr{$elty},
+                iwork::Ptr{BlasInt}, ifail::Ptr{BlasInt}, info::Ref{BlasInt}, 1::Clong, 1::Clong, 1::Clong
+            )::Cvoid
+            chkargsok(info[])
+            return W, Z, info[], ifail
+        end
+
+        # SUBROUTINE DSPEVD( JOBZ, UPLO, N, AP, W, Z, LDZ, WORK, LWORK, IWORK, LIWORK, INFO )
+        #    *     .. Scalar Arguments ..
+        #          CHARACTER          JOBZ, UPLO
+        #          INTEGER            INFO, LDZ, LIWORK, LWORK, N
+        #    *     ..
+        #    *     .. Array Arguments ..
+        #          INTEGER            IWORK( * )
+        #          DOUBLE PRECISION   AP( * ), W( * ), WORK( * ), Z( LDZ, * )
+        function spevd!(jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty}, W::PtrOrVec{$elty},
+            Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty}, lwork::Integer, iwork::PtrOrVec{BlasInt}, liwork::Integer)
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(spevd))(
+                jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, W::Ptr{$elty}, Z::Ptr{$elty},
+                ldz::Ref{BlasInt}, work::Ptr{$elty}, lwork::Ref{BlasInt}, iwork::Ptr{BlasInt}, liwork::Ref{BlasInt},
+                info::Ref{BlasInt}, 1::Clong, 1::Clong
+            )::Cvoid
+            chklapackerror(info[])
+            return W, Z
+        end
+
+        # SUBROUTINE DSPGV( ITYPE, JOBZ, UPLO, N, AP, BP, W, Z, LDZ, WORK, INFO )
+        #    *     .. Scalar Arguments ..
+        #          CHARACTER          JOBZ, UPLO
+        #          INTEGER            INFO, ITYPE, LDZ, N
+        #    *     ..
+        #    *     .. Array Arguments ..
+        #          DOUBLE PRECISION   AP( * ), BP( * ), W( * ), WORK( * ), Z( LDZ, * )
+        function spgv!(itype::Integer, jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty},
+            BP::PtrOrVec{$elty}, W::PtrOrVec{$elty}, Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty})
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(spgv))(
+                itype::Ref{BlasInt}, jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, BP::Ptr{$elty},
+                W::Ptr{$elty}, Z::Ptr{$elty}, ldz::Ref{BlasInt}, work::Ptr{$elty}, info::Ref{BlasInt}, 1::Clong, 1::Clong
+            )::Cvoid
+            chklapackerror(info[])
+            return W, Z
+        end
+
+        # SUBROUTINE DSPGVX( ITYPE, JOBZ, RANGE, UPLO, N, AP, BP, VL, VU, IL, IU, ABSTOL, M, W, Z, LDZ, WORK, IWORK, IFAIL,
+        #                    INFO )
+        #    *     .. Scalar Arguments ..
+        #          CHARACTER          JOBZ, RANGE, UPLO
+        #          INTEGER            IL, INFO, ITYPE, IU, LDZ, M, N
+        #          DOUBLE PRECISION   ABSTOL, VL, VU
+        #    *     ..
+        #    *     .. Array Arguments ..
+        #          INTEGER            IFAIL( * ), IWORK( * )
+        #          DOUBLE PRECISION   AP( * ), BP( * ), W( * ), WORK( * ), Z( LDZ, * )
+        function spgvx!(itype::Integer, jobz::AbstractChar, range::AbstractChar, uplo::AbstractChar, n::Integer,
+            AP::PtrOrVec{$elty}, BP::PtrOrVec{$elty}, vl::Union{Nothing,$elty}, vu::Union{Nothing,$elty},
+            il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::$elty, m::Integer, W::PtrOrVec{$elty},
+            Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty}, iwork::PtrOrVec{BlasInt}, ifail::PtrOrVec{BlasInt})
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(spgvx))(
+                itype::Ref{BlasInt}, jobz::Ref{UInt8}, range::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty},
+                BP::Ptr{$elty}, (isnothing(vl) ? C_NULL : Ref(vl))::Ptr{$elty},
+                (isnothing(vu) ? C_NULL : Ref(vu))::Ptr{$elty},
+                (isnothing(il) ? C_NULL : Ref(BlasInt(il)))::Ptr{BlasInt},
+                (isnothing(iu) ? C_NULL : Ref(BlasInt(iu)))::Ptr{BlasInt},
+                abstol::Ref{$elty}, m::Ref{BlasInt}, W::Ptr{$elty}, Z::Ptr{$elty}, ldz::Ref{BlasInt}, work::Ptr{$elty},
+                iwork::Ptr{BlasInt}, ifail::Ptr{BlasInt}, info::Ref{BlasInt}, 1::Clong, 1::Clong, 1::Clong
+            )::Cvoid
+            chkargsok(info[])
+            return W, Z, info[], ifail
+        end
+
+        # SUBROUTINE DSPGVD( ITYPE, JOBZ, UPLO, N, AP, BP, W, Z, LDZ, WORK, LWORK, IWORK, LIWORK, INFO )
+        #    *     .. Scalar Arguments ..
+        #          CHARACTER          JOBZ, UPLO
+        #          INTEGER            INFO, ITYPE, LDZ, LIWORK, LWORK, N
+        #    *     ..
+        #    *     .. Array Arguments ..
+        #          INTEGER            IWORK( * )
+        #          DOUBLE PRECISION   AP( * ), BP( * ), W( * ), WORK( * ), Z( LDZ, * )
+        function spgvd!(itype::Integer, jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty},
+            BP::PtrOrVec{$elty}, W::PtrOrVec{$elty}, Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty}, lwork::Integer,
+            iwork::PtrOrVec{BlasInt}, liwork::Integer)
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(spgvd))(
+                itype::Ref{BlasInt}, jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, BP::Ptr{$elty},
+                W::Ptr{$elty}, Z::Ptr{$elty}, ldz::Ref{BlasInt}, work::Ptr{$elty}, lwork::Ref{BlasInt}, iwork::Ptr{BlasInt},
+                liwork::Ref{BlasInt}, info::Ref{BlasInt}, 1::Clong, 1::Clong
+            )::Cvoid
+            chklapackerror(info[])
+            return W, Z
+        end
+    end
+    elty <: Complex && @eval begin
+        # SUBROUTINE ZHPEV( JOBZ, UPLO, N, AP, W, Z, LDZ, WORK, RWORK, INFO )
+        #    *     .. Scalar Arguments ..
+        #          CHARACTER          JOBZ, UPLO
+        #          INTEGER            INFO, LDZ, N
+        #    *     ..
+        #    *     .. Array Arguments ..
+        #          DOUBLE PRECISION   RWORK( * ), W( * )
+        #          COMPLEX*16         AP( * ), WORK( * ), Z( LDZ, * )
+        function spev!(jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty}, W::PtrOrVec{$elty},
+            Z::PtrOrVec{$elty}, ldz::Integer, work::PtrOrVec{$elty}, rwork::PtrOrVec{$(_realtype(elty))})
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(spev))(
+                jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, W::Ptr{$elty}, Z::Ptr{$elty},
+                ldz::Ref{BlasInt}, work::Ptr{$elty}, rwork::Ptr{$(_realtype(elty))}, info::Ref{BlasInt}, 1::Clong, 1::Clong
+            )::Cvoid
+            chklapackerror(info[])
+            return W, Z
+        end
+
+        # SUBROUTINE ZHPEVX( JOBZ, RANGE, UPLO, N, AP, VL, VU, IL, IU, ABSTOL, M, W, Z, LDZ, WORK, RWORK, IWORK, IFAIL, INFO )
+        #    *     .. Scalar Arguments ..
+        #          CHARACTER          JOBZ, RANGE, UPLO
+        #          INTEGER            IL, INFO, IU, LDZ, M, N
+        #          DOUBLE PRECISION   ABSTOL, VL, VU
+        #    *     ..
+        #    *     .. Array Arguments ..
+        #          INTEGER            IFAIL( * ), IWORK( * )
+        #          DOUBLE PRECISION   RWORK( * ), W( * )
+        #          COMPLEX*16         AP( * ), WORK( * ), Z( LDZ, * )
+        function spevx!(jobz::AbstractChar, range::AbstractChar, uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty},
+            vl::Union{Nothing,$(_realtype(elty))}, vu::Union{Nothing,$(_realtype(elty))}, il::Union{Nothing,<:Integer},
+            iu::Union{Nothing,<:Integer}, abstol::$(_realtype(elty)), m::Integer, W::PtrOrVec{$(_realtype(elty))},
+            Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty}, rwork::PtrOrVec{$(_realtype(elty))},
+            iwork::PtrOrVec{BlasInt}, ifail::PtrOrVec{BlasInt})
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(spevx))(
+                jobz::Ref{UInt8}, range::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty},
+                (isnothing(vl) ? C_NULL : Ref(vl))::Ptr{$(_realtype(elty))},
+                (isnothing(vu) ? C_NULL : Ref(vu))::Ptr{$(_realtype(elty))},
+                (isnothing(il) ? C_NULL : Ref(BlasInt(il)))::Ptr{BlasInt},
+                (isnothing(iu) ? C_NULL : Ref(BlasInt(iu)))::Ptr{BlasInt},
+                abstol::Ref{$elty}, m::Ref{BlasInt}, W::Ptr{$(_realtype(elty))}, Z::Ptr{$elty}, ldz::Ref{BlasInt},
+                work::Ptr{$elty}, rwork::Ptr{$(_realtype(elty))}, iwork::Ptr{BlasInt}, ifail::Ptr{BlasInt},
+                info::Ref{BlasInt}, 1::Clong, 1::Clong, 1::Clong
+            )::Cvoid
+            chkargsok(info[])
+            return W, Z, info[], ifail
+        end
+
+        # SUBROUTINE ZHPEVD( JOBZ, UPLO, N, AP, W, Z, LDZ, WORK, LWORK, RWORK, LRWORK, IWORK, LIWORK, INFO )
+        #    *     .. Scalar Arguments ..
+        #          CHARACTER          JOBZ, UPLO
+        #          INTEGER            INFO, LDZ, LIWORK, LRWORK, LWORK, N
+        #    *     ..
+        #    *     .. Array Arguments ..
+        #          INTEGER            IWORK( * )
+        #          DOUBLE PRECISION   RWORK( * ), W( * )
+        #          COMPLEX*16         AP( * ), WORK( * ), Z( LDZ, * )
+        function spevd!(jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty},
+            W::PtrOrVec{$(_realtype(elty))}, Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty}, lwork::Integer,
+            rwork::PtrOrVec{$(_realtype(elty))}, lrwork::Integer, iwork::PtrOrVec{BlasInt}, liwork::Integer)
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(spevd))(
+                jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, W::Ptr{$(_realtype(elty))}, Z::Ptr{$elty},
+                ldz::Ref{BlasInt}, work::Ptr{$elty}, lwork::Ref{BlasInt}, rwork::Ptr{$(_realtype(elty))}, lrwork::Ref{BlasInt},
+                iwork::Ptr{BlasInt}, liwork::Ref{BlasInt}, info::Ref{BlasInt}, 1::Clong, 1::Clong
+            )::Cvoid
+            chklapackerror(info[])
+            return W, Z
+        end
+
+        # SUBROUTINE ZHPGV( ITYPE, JOBZ, UPLO, N, AP, BP, W, Z, LDZ, WORK, RWORK, INFO )
+        #    *     .. Scalar Arguments ..
+        #          CHARACTER          JOBZ, UPLO
+        #          INTEGER            INFO, ITYPE, LDZ, N
+        #    *     ..
+        #    *     .. Array Arguments ..
+        #          DOUBLE PRECISION   RWORK( * ), W( * )
+        #          COMPLEX*16         AP( * ), BP( * ), WORK( * ), Z( LDZ, * )
+        function spgv!(itype::Integer, jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty},
+            BP::PtrOrVec{$elty}, W::PtrOrVec{$elty}, Z::PtrOrVec{$elty}, ldz::Integer, work::PtrOrVec{$elty},
+            rwork::PtrOrVec{$(_realtype(elty))})
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(spgv))(
+                itype::Ref{BlasInt}, jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, BP::Ptr{$elty},
+                W::Ptr{$elty}, Z::Ptr{$elty}, ldz::Ref{BlasInt}, work::Ptr{$elty}, rwork::Ptr{$(_realtype(elty))},
+                info::Ref{BlasInt}, 1::Clong, 1::Clong
+            )::Cvoid
+            chklapackerror(info[])
+            return W, Z
+        end
+
+        # SUBROUTINE ZHPGVX( ITYPE, JOBZ, RANGE, UPLO, N, AP, BP, VL, VU, IL, IU, ABSTOL, M, W, Z, LDZ, WORK, RWORK, IWORK,
+        #                    IFAIL, INFO )
+        #    *     .. Scalar Arguments ..
+        #          CHARACTER          JOBZ, RANGE, UPLO
+        #          INTEGER            IL, INFO, ITYPE, IU, LDZ, M, N
+        #          DOUBLE PRECISION   ABSTOL, VL, VU
+        #    *     ..
+        #    *     .. Array Arguments ..
+        #          INTEGER            IFAIL( * ), IWORK( * )
+        #          DOUBLE PRECISION   RWORK( * ), W( * )
+        #          COMPLEX*16         AP( * ), BP( * ), WORK( * ), Z( LDZ, * )
+        function spgvx!(itype::Integer, jobz::AbstractChar, range::AbstractChar, uplo::AbstractChar, n::Integer,
+            AP::PtrOrVec{$elty}, BP::PtrOrVec{$elty}, vl::Union{Nothing,$(_realtype(elty))},
+            vu::Union{Nothing,$(_realtype(elty))}, il::Union{Nothing,<:Integer},
+            iu::Union{Nothing,<:Integer}, abstol::$(_realtype(elty)), m::Integer, W::PtrOrVec{$(_realtype(elty))},
+            Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty}, rwork::PtrOrVec{$(_realtype(elty))},
+            iwork::PtrOrVec{BlasInt}, ifail::PtrOrVec{BlasInt})
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(spgvx))(
+                itype::Ref{BlasInt}, jobz::Ref{UInt8}, range::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty},
+                BP::Ptr{$elty}, (isnothing(vl) ? C_NULL : Ref(vl))::Ptr{$(_realtype(elty))},
+                (isnothing(vu) ? C_NULL : Ref(vu))::Ptr{$(_realtype(elty))},
+                (isnothing(il) ? C_NULL : Ref(BlasInt(il)))::Ptr{BlasInt},
+                (isnothing(iu) ? C_NULL : Ref(BlasInt(iu)))::Ptr{BlasInt},
+                abstol::Ref{$elty}, m::Ref{BlasInt}, W::Ptr{$(_realtype(elty))}, Z::Ptr{$elty}, ldz::Ref{BlasInt},
+                work::Ptr{$elty}, rwork::Ptr{$(_realtype(elty))}, iwork::Ptr{BlasInt}, ifail::Ptr{BlasInt},
+                info::Ref{BlasInt}, 1::Clong, 1::Clong, 1::Clong
+            )::Cvoid
+            chkargsok(info[])
+            return W, Z, info[], ifail
+        end
+
+        # SUBROUTINE ZHPGVD( ITYPE, JOBZ, UPLO, N, AP, BP, W, Z, LDZ, WORK, LWORK, RWORK, LRWORK, IWORK, LIWORK, INFO )
+        #    *     .. Scalar Arguments ..
+        #          CHARACTER          JOBZ, UPLO
+        #          INTEGER            INFO, ITYPE, LDZ, LIWORK, LRWORK, LWORK, N
+        #    *     ..
+        #    *     .. Array Arguments ..
+        #          INTEGER            IWORK( * )
+        #          DOUBLE PRECISION   RWORK( * ), W( * )
+        #          COMPLEX*16         AP( * ), BP( * ), WORK( * ), Z( LDZ, * )
+        function spgvd!(itype::Integer, jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty},
+            BP::PtrOrVec{$elty}, W::PtrOrVec{$(_realtype(elty))}, Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty},
+            lwork::Integer, rwork::PtrOrVec{$(_realtype(elty))}, lrwork::Integer, iwork::PtrOrVec{BlasInt}, liwork::Integer)
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(spgvd))(
+                itype::Ref{BlasInt}, jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, BP::Ptr{$elty},
+                W::Ptr{$(_realtype(elty))}, Z::Ptr{$elty}, ldz::Ref{BlasInt}, work::Ptr{$elty}, lwork::Ref{BlasInt},
+                rwork::Ptr{$(_realtype(elty))}, lrwork::Ref{BlasInt}, iwork::Ptr{BlasInt}, liwork::Ref{BlasInt},
+                info::Ref{BlasInt}, 1::Clong, 1::Clong
+            )::Cvoid
+            chklapackerror(info[])
+            return W, Z
+        end
+    end
+    @eval begin
+        # SUBROUTINE ZHPTRD( UPLO, N, AP, D, E, TAU, INFO )
+        # *     .. Scalar Arguments ..
+        #       CHARACTER          UPLO
+        #       INTEGER            INFO, N
+        # *     ..
+        # *     .. Array Arguments ..
+        #       DOUBLE PRECISION   D( * ), E( * )
+        #       COMPLEX*16         AP( * ), TAU( * )
+        function hptrd!(uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty}, D::PtrOrVec{$(_realtype(elty))},
+            E::PtrOrVec{$(_realtype(elty))}, τ::PtrOrVec{$elty})
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(hptrd))(
+                uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, D::Ptr{$(_realtype(elty))}, E::Ptr{$(_realtype(elty))},
+                τ::Ptr{$elty}, info::Ref{BlasInt}, 1::Clong
+            )::Cvoid
+            chklapackerror(info)
+            return AP, τ, D, E
+        end
+
+        # SUBROUTINE DOPGTR( UPLO, N, AP, TAU, Q, LDQ, WORK, INFO )
+        # *     .. Scalar Arguments ..
+        #       CHARACTER          UPLO
+        #       INTEGER            INFO, LDQ, N
+        # *     ..
+        # *     .. Array Arguments ..
+        #       DOUBLE PRECISION   AP( * ), Q( LDQ, * ), TAU( * ), WORK( * )
+        function opgtr!(uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty}, τ::PtrOrVec{$elty}, Q::PtrOrMat{$elty},
+            ldq::Integer, work::PtrOrVec{$elty})
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(opgtr))(
+                uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, τ::Ptr{$elty}, Q::Ptr{$elty}, ldq::Ref{BlasInt},
+                work::Ptr{$elty}, info::Ref{BlasInt}, 1::Clong
+            )::Cvoid
+            chklapackerror(info[])
+            return Q
+        end
+
+        # SUBROUTINE DOPMTR( SIDE, UPLO, TRANS, M, N, AP, TAU, C, LDC, WORK, INFO )
+        #    *     .. Scalar Arguments ..
+        #          CHARACTER          SIDE, TRANS, UPLO
+        #          INTEGER            INFO, LDC, M, N
+        #    *     ..
+        #    *     .. Array Arguments ..
+        #          DOUBLE PRECISION   AP( * ), C( LDC, * ), TAU( * ), WORK( * )
+        function opmtr!(side::AbstractChar, uplo::AbstractChar, trans::AbstractChar, m::Integer, n::Integer,
+            AP::PtrOrVec{$elty}, τ::PtrOrVec{$elty}, C::PtrOrMat{$elty}, ldc::Integer, work::PtrOrVec{$elty})
+            chkuplo(uplo)
+            info = Ref{BlasInt}()
+            @ccall libblastrampoline.$(@blasfunc(opmtr))(
+                side::Ref{UInt8}, uplo::Ref{UInt8}, trans::Ref{UInt8}, m::Ref{BlasInt}, n::Ref{BlasInt}, AP::Ptr{$elty},
+                τ::Ptr{$elty}, C::Ptr{$elty}, ldc::Ref{BlasInt}, work::Ptr{$elty}, info::Ref{BlasInt}, 1::Clong, 1::Clong,
+                1::Clong
+            )::Cvoid
+            chklapackerror(info[])
+            return C
         end
     end
 end
 
-@doc """
-    spev!(jobz, uplo, n, AP; [W, Z, work])
+macro pmalso(fun)
+    # fun is a function definition that contains uplo and a PM-typed parameter. We rewrite this into two function definitions:
+    # - one where we just replace PM by AbstractVector
+    # - one where we remove the uplo parameter, replace all PM{T} by PM and add where {PM<:PackedMatrixUnscaled{T}} and
+    #   introduce the uplo variable
+    @assert(fun.head === :function)
+    fun2 = deepcopy(fun)
+    fncall, fncall2 = fun.args[1], fun2.args[1]
+    fncall2parent = fun2
+    while fncall.head === :where
+        fncall = fncall.args[1]
+        fncall2parent = fncall2
+        fncall2 = fncall2.args[1]
+    end
+    @assert(fncall.head === :call)
+    commontype = nothing # this will hold the name of our generic type, most likely :T
+    for i in length(fncall.args):-1:2
+        arg = fncall.args[i]
+        if arg.head === :(::)
+            length(arg.args) < 2 && continue
+            if arg.args[1] === :uplo
+                deleteat!(fncall2.args, i) # remove the uplo parameter from the second function definition
+                continue
+            end
+            type = arg.args[2]
+            if type === :PM
+                arg.args[2] = :AbstractVector # in the first function definition, replace PM by AbstractVector
+            elseif type isa Expr && type.head === :curly && type.args[1] === :PM
+                type.args[1] = :AbstractVector # in the first function definition, replace PM{T} by AbstractVector{T}
+                if isnothing(commontype)
+                    commontype = type.args[2] # capture the type argument for the second function definition
+                else
+                    @assert(type.args[2] === commontype)
+                end
+                fncall2.args[i].args[2] = :PM # in the second function definition, replace PM{T} by PM
+            end
+        elseif arg === :uplo # doesn't happen as upload is always qualified with AbstractChar, but anyway...
+            deleteat!(fncall2.args, i)
+        end
+    end
+    # in the second function definition, introduce a new where capture
+    fncall2parent.args[1] = Expr(:where, fncall2, isnothing(commontype) ? :(PM<:PackedMatrixUnscaled) :
+                                                                          :(PM<:PackedMatrixUnscaled{$commontype}))
+    # in the second function definition, make the variable uplo available
+    @assert(fun2.args[2].head === :block)
+    pushfirst!(fun2.args[2].args, :(uplo = packed_ulchar(PM)))
+    esc(quote
+        $fun
+        $fun2
+    end)
+end
 
-`spev!` computes all the eigenvalues and, optionally, eigenvectors of a real symmetric matrix `A` in packed storage.
-""" spev!
-
-@doc """
-    spevx!(jobz, range, uplo, n, AP, vl, vu, il, iu, abstol; [W, Z,  work, iwork, ifail])
-
-`spevx!` computes selected eigenvalues and, optionally, eigenvectors of a real symmetric matrix `A` in packed storage.
-Eigenvalues/vectors can be selected by specifying either a range of values or a range of indices for the desired eigenvalues.
-""" spevx!
-
-@doc """
-    spevd!(jobz, uplo, n, AP; [W, Z, work, iwork])
-
-`spevd!` computes all the eigenvalues and, optionally, eigenvectors of a real symmetric matrix `A` in packed storage. If
-eigenvectors are desired, it uses a divide and conquer algorithm.
-""" spevd!
+@pmalso function hpr!(uplo::AbstractChar, α::Real, x::AbstractVector{T}, AP::PM{T}) where {T<:BlasComplex}
+    require_one_based_indexing(AP, x)
+    N = length(x)
+    2length(AP) ≥ N*(N + 1) ||
+        throw(DimensionMismatch(lazy"Packed symmetric matrix A has size smaller than length(x) = $(N)."))
+    chkstride1(AP)
+    px, stx = vec_pointer_stride(x, ArgumentError("input vector with 0 stride is not allowed"))
+    return GC.@preserve x hpr!(uplo, N, T(α), px, stx, AP)
+end
 
 @doc raw"""
-    pptrf!(uplo, n, AP)
+    hpr!(uplo, α, x, AP::AbstractVector)
+    hpr!(α, x, AP::PackedMatrixUnscaled)
 
-`pptrf!` computes the Cholesky factorization of a real symmetric positive definite matrix `A` stored in packed format.
+Update matrix ``A`` as ``A + \alpha x x'``, where ``A`` is a Hermitian matrix provided in packed format `AP` and `x` is a
+vector.
 
-The factorization has the form
-- ``A = U^\top U``,  if `uplo == 'U'`, or
-- ``A = L L^\top``,  if `uplo == 'L'`,
-where ``U`` is an upper triangular matrix and ``L`` is lower triangular.
-""" pptrf!
+With `uplo = 'U'`, the vector `AP` must contain the upper triangular part of the Hermitian matrix packed sequentially, column
+by column, so that `AP[1]` contains `A[1, 1]`, `AP[2]` and `AP[3]` contain `A[1, 2]` and `A[2, 2]` respectively, and so on.
 
-@doc raw"""
-    spmv!(uplo, α, AP, x, β, y)
+With `uplo = 'L'`, the vector `AP` must contain the lower triangular part of the symmetric matrix packed sequentially, column
+by column, so that `AP[1]` contains `A[1, 1]`, `AP[2]` and `AP[3]` contain `A[2, 1]` and `A[3, 1]` respectively, and so on.
 
-`spmv!` performs the matrix-vector operation
-``y := \alpha A x + \beta y``,
+The scalar input `α` must be real.
 
-where `α` and `β` are scalars, `x` and `y` are `n` element vectors and `A` is an `n × n` symmetric matrix, supplied in packed
-form.
-""" spmv!
+The array inputs `x` and `AP` must all be of `ComplexF32` or `ComplexF64` type. Return the updated `AP`.
+"""
+hpr!
 
-@doc raw"""
-    spr!(uplo, α, x, AP)
+@doc """
+    gemmt!(uplo, transA, transB, alpha, A, B, beta, C)
 
-`spr!` performs the symmetric rank 1 operation
-``A := \alpha x x^\top + A``,
-where `α` is a real scalar, `x` is an `n` element vector and `A` is an `n × n` symmetric matrix, supplied in packed form.
-""" spr!
+`gemmt!` computes a matrix-matrix product with general matrices but updates only the upper or lower triangular part of the
+result matrix.
+
+!!! info
+    This function is a recent BLAS extension; for OpenBLAS, it requires at least version 0.3.22 (which is not yet shipped with
+    Julia). If the currently available BLAS does not offer `gemmt`, the function falls back to `gemm`.
+""" gemmt!
+
+@pmalso function trttp!(uplo::AbstractChar, A::AbstractMatrix{T}, AP::PM{T}) where {T<:BlasFloat}
+    chkstride1(AP)
+    require_one_based_indexing(AP, A)
+    n = checksquare(A)
+    chkpacked(n, AP)
+    return trttp(uplo, n, A, max(1, stride(A, 2)), AP)
+end
+
+@pmalso function trttp!(uplo::AbstractChar, A::AbstractMatrix{T}, AP::PM{T}) where {T}
+    chkuplo(uplo)
+    n = checksquare(A)
+    chkpacked(n, AP)
+    if uplo == 'L' || uplo == 'l'
+        k = 0
+        @inbounds for j in 1:n, i in j:n
+            k += 1
+            AP[k] = A[i, j]
+        end
+    else
+        k = 0
+        @inbounds for j in 1:n, i in 1:j
+            k += 1
+            AP[k] = A[i, j]
+        end
+    end
+    return AP
+end
 
 """
-    tpttr!(uplo, AP, A)
+    trttp!(uplo, A, AP::AbstractVector)
+    trttp!(A, AP::PackedMatrixUnscaled)
 
-`tpttr!` copies a triangular matrix from the standard packed format (TP) to the standard full format (TR).
+`trttp!` copies a triangular matrix from the standard full format (TR) to the standard packed format (TP).
 
 !!! info
     This function is also implemented in plain Julia and therefore works with arbitrary element types.
 """
-function tpttr!(uplo::AbstractChar, AP::AbstractVector{T}, A::AbstractMatrix{T}) where {T}
-    BLAS.chkuplo(uplo)
-    n = LinearAlgebra.checksquare(A)
+trttp!
+
+@pmalso function tpttr!(uplo::AbstractChar, AP::PM{T}, A::AbstractMatrix{T}) where {T<:BlasFloat}
+    chkstride1(AP)
+    require_one_based_indexing(AP, A)
+    n = checksquare(A)
+    chkpacked(n, AP)
+    return tpttr(uplo, n, AP, A, max(1, stride(A, 2)))
+end
+
+@pmalso function tpttr!(uplo::AbstractChar, AP::PM{T}, A::AbstractMatrix{T}) where {T}
+    chkuplo(uplo)
+    n = checksquare(A)
     chkpacked(n, AP)
     if uplo == 'L' || uplo == 'l'
         k = 0
@@ -438,40 +871,1469 @@ function tpttr!(uplo::AbstractChar, AP::AbstractVector{T}, A::AbstractMatrix{T})
 end
 
 """
-    trttp!(uplo, A, AP)
+    tpttr!(uplo, AP::AbstractVector, A)
+    tpttr!(AP::PackedMatrixUnscaled, A)
 
-`trttp!` copies a triangular matrix from the standard full format (TR) to the standard packed format (TP).
+`tpttr!` copies a triangular matrix from the standard packed format (TP) to the standard full format (TR).
 
 !!! info
     This function is also implemented in plain Julia and therefore works with arbitrary element types.
 """
-function trttp!(uplo::AbstractChar, A::AbstractMatrix{T}, AP::AbstractVector{T}) where {T}
-    BLAS.chkuplo(uplo)
-    n = LinearAlgebra.checksquare(A)
-    chkpacked(n, AP)
-    if uplo == 'L' || uplo == 'l'
-        k = 0
-        @inbounds for j in 1:n, i in j:n
-            k += 1
-            AP[k] = A[i, j]
-        end
-    else
-        k = 0
-        @inbounds for j in 1:n, i in 1:j
-            k += 1
-            AP[k] = A[i, j]
-        end
-    end
-    return AP
+tpttr!
+
+@pmalso function pptrf!(uplo::AbstractChar, AP::PM{<:BlasFloat})
+    require_one_based_indexing(AP)
+    chkstride1(AP)
+    return pptrf!(uplo, packedside(AP), n)
 end
 
-@doc """
-    gemmt!(uplo, transA, transB, alpha, A, B, beta, C)
+@doc raw"""
+    pptrf!(uplo, AP::AbstractVector)
+    pptrf!(AP::PackedMatrixUnscaled)
 
-`gemmt!` computes a matrix-matrix product with general matrices but updates only the upper or lower triangular part of the
-result matrix.
+`pptrf!` computes the Cholesky factorization of a real symmetric or complex Hermitian positive definite matrix ``A`` stored in
+packed format `AP`.
 
-!!! info
-    This function is a recent BLAS extension; for OpenBLAS, it requires at least version 0.3.22 (which is not yet shipped with
-    Julia). If the currently available BLAS does not offer `gemmt`, the function falls back to `gemm`.
-""" gemmt!
+The factorization has the form
+- ``A = U' U``,  if `uplo == 'U'`, or
+- ``A = L L'``,  if `uplo == 'L'`,
+where ``U`` is an upper triangular matrix and ``L`` is lower triangular.
+"""
+pptrf!
+
+@pmalso function pptrs!(uplo::AbstractChar, AP::PM{T}, B::AbstractVecOrMat{T}) where {T<:BlasFloat}
+    require_one_based_indexing(AP, B)
+    chkstride1(AP, B)
+    n = packedside(AP)
+    nrhs = size(B, 2)
+    size(B, 1) == n || throw(DimensionMismatch("first dimension of B, $(size(B,1)), and size of A, ($n,$n), must match!"))
+    iszero(nrhs) && return B
+    return pptrs!(uplo, n, nrhs, AP, B, max(1, stride(B, 2)))
+end
+
+@doc raw"""
+    pptrs!(uplo, AP::AbstractVector, B)
+    pptrs!(AP::PackedMatrixUnscaled, B)
+
+`pptrs!` solves a system of linear equations ``A X = B`` with a symmetric or Hermitian positive definite matrix ``A`` in packed
+storage `AP` using the Cholesky factorization ``A = U' U`` or ``A = L L'`` computed by [`pptrf!`](@ref).
+"""
+pptrs!
+
+@pmalso function pptri!(uplo::AbstractChar, AP::PM{<:BlasFloat})
+    require_one_based_indexing(AP)
+    chkstride1(AP)
+    return pptri!(uplo, length(AP), packedside(AP))
+end
+
+@doc raw"""
+    pptri!(uplo, AP::AbstractVector)
+    pptri!(AP::PackedMatrixUnscaled)
+
+`pptri!` computes the inverse of a real symmetric or complex Hermitian positive definite matrix `A` using the Cholesky
+factorization ``A = U' U`` or ``A = L L'`` computed by [`pptrf!`](@ref).
+"""
+pptri!
+
+@doubledoc psv begin
+    @pmalso function $f(uplo::AbstractChar, AP::PM{T}, ipiv::Union{<:AbstractVector{BlasInt},Missing},
+        B::AbstractVecOrMat{T}) where {T<:$T}
+        require_one_based_indexing(AP, B)
+        chkstride1(AP, B)
+        n = packedside(AP)
+        size(B, 1) == n || throw(DimensionMismatch("B has first dimension $(size(B, 1)), but needs $n"))
+        if ismissing(ipiv)
+            ipiv = Vector{BlasInt}(undef, n)
+        else
+            length(ipiv) == n || throw(DimensionMismatch("ipiv has length $(length(ipiv)), but needs $n"))
+            require_one_based_indexing(ipiv)
+            chkstride1(ipiv)
+        end
+        return $f(uplo, n, size(B, 2), AP, ipiv, B, max(1, stride(B, 2)))
+    end
+    @pmalso function $f(uplo::AbstractChar, AP::PM{T}, B::AbstractVecOrMat{T}) where {T<:$T}
+        return $f(uplo, AP, missing, B)
+    end
+
+"""
+    $($fn)(uplo, AP::AbstractVector, ipiv=missing, B) -> (B, AP, ipiv)
+    $($fn)(AP::PackedMatrixUnscaled, ipiv=missing, B) -> (B, AP, ipiv)
+
+`$($fn)` computes the solution to a $($field) system of linear equations ``A X = B``, where ``A`` is an ``N``-by-``N`` $($typ)
+matrix stored in packed format `AP` and ``X`` and `B` are ``N``-by-``N_{\\mathrm{rhs}}`` matrices.
+
+The diagonal pivoting method is used to factor ``A`` as
+- ``A = U D U$($op)``,  if `UPLO = 'U'`, or
+- ``A = L D L$($op)``,  if `UPLO = 'L'`,
+where `U` (or `L`) is a product of permutation and unit upper (lower) triangular matrices, `D` is $($typ) and block diagonal
+with 1-by-1 and 2-by-2 diagonal blocks. The factored form of ``A`` is then used to solve the system of equations ``A X = B``.
+"""
+    $f
+end
+
+@doubledoc ptrf begin
+    @pmalso function $f(uplo::AbstractChar, AP::PM{$T}, ipiv::Union{<:AbstractVector{BlasInt},Missing}=missing)
+        require_one_based_indexing(AP)
+        chkstride1(AP)
+        n = packedside(AP)
+        if ismissing(ipiv)
+            ipiv = Vector{BlasInt}(undef, n)
+        else
+            length(ipiv) == n || throw(DimensionMismatch("ipiv has length $(length(ipiv)), but needs $n"))
+            require_one_based_indexing(ipiv)
+            chkstride1(ipiv)
+        end
+        return $f(uplo, n, AP, ipiv)
+    end
+
+"""
+    $($fn)(uplo, AP::AbstractVector, ipiv=missing) -> (AP, ipiv, info)
+    $($fn)(AP::PackedMatrixUnscaled, ipiv=missing) -> (AP, ipiv, info)
+
+`$($fn)` computes the factorization of a $($field) $($typ) matrix ``A`` stored in packed format `AP` using the Bunch-Kaufman
+diagonal pivoting method:
+
+``A = U D U$($op)``  or  ``A = L D L$($op)``
+
+where ``U`` (or ``L``) is a product of permutation and unit upper (lower) triangular matrices, and ``D`` is $($typ) and block
+diagonal with 1-by-1 and 2-by-2 diagonal blocks.
+"""
+    $f
+end
+
+@doubledoc ptrs begin
+    @pmalso function $f(uplo::AbstractChar, AP::PM{T}, ipiv::AbstractVector{BlasInt}, B::AbstractVecOrMat{T}) where {T<:$T}
+        require_one_based_indexing(AP, B, ipiv)
+        chkstride1(AP, B, ipiv)
+        n = length(ipiv)
+        chkpacked(AP, n)
+        size(B, 1) == n || throw(DimensionMismatch("B has first dimension $(size(B, 1)), but needs $n"))
+        return $f(uplo, n, size(B, 2), AP, ipiv, B, max(1, stride(B, 2)))
+    end
+
+"""
+    $($fn)(uplo, AP::AbstractVector, ipiv=missing, B)
+    $($fn)(AP::PackedMatrixUnscaled, ipiv=missing, B)
+
+`$($fn)` solves a system of linear equations ``A X = B`` with a $($field) $($typ) matrix ``A`` stored in packed format using
+the factorization ``A = U D U$($op)`` or ``A = L D L$($op)`` computed by [`$($prefix)ptrf!`](@ref).
+"""
+    $f
+end
+
+@doubledoc ptri begin
+    @pmalso function $f(uplo::AbstractChar, AP::PM{T}, ipiv::AbstractVector{BlasInt},
+        work::Union{<:AbstractVector{T},Missing}=missing) where {T<:$T}
+        require_one_based_indexing(AP, ipiv)
+        chkstride1(AP, ipiv)
+        n = length(ipiv)
+        chkpacked(n, AP)
+        if ismissing(work)
+            work = Vector{T}(undef, n)
+        else
+            length(work) ≥ n || throw(DimensionMismatch("work has length $(length(work)), but needs at least $n"))
+            require_one_based_indexing(work)
+            chkstride1(work)
+        end
+        return $f(uplo, n, AP, ipiv, work)
+    end
+
+"""
+    $($fn)(uplo, AP::AbstractVector, ipiv, work=missing)
+    $($fn)(AP::PackedMatrixUnscaled, ipiv, work=missing)
+
+`$($fn)` computes the inverse of a $($field) $($typ) indefinite matrix ``A`` in packed storage `AP` using the factorization
+``A = U D U$($op)`` or ``A = L D L$($op)`` computed by [`$($prefix)ptrf!`](@ref).
+"""
+    $f
+end
+
+spev!(jobz::AbstractChar, args...) = spev!(Val(Symbol(jobz)), args...)
+
+@pmalso function spev!(::Val{:N}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{T},Missing}=missing,
+    work::Union{<:AbstractVector{T},Missing}=missing) where {T<:BlasReal}
+    require_one_based_indexing(AP)
+    chkstride1(AP)
+    if ismissing(W)
+        n = packedside(AP)
+        W = Vector{T}(undef, n)
+    else
+        n = length(W)
+        chkpacked(n, AP)
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, 3n)
+    else
+        length(work) < 3n && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    return spev!('N', uplo, n, AP, W, Ptr{T}(C_NULL), 1, work)[1]
+end
+
+@pmalso function spev!(::Val{:V}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{T},Missing}=missing,
+    Z::Union{<:AbstractMatrix{T},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing) where {T<:BlasReal}
+    require_one_based_indexing(AP)
+    chkstride1(AP)
+    if ismissing(W)
+        n = packedside(AP)
+        W = Vector{T}(undef, n)
+    else
+        n = length(W)
+        chkpacked(n, AP)
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(Z)
+        Z = Matrix{T}(undef, n, n)
+    else
+        checksquare(Z) == n || throw(DimensionMismatch("The provided matrix was too small"))
+        require_one_based_indexing(Z)
+        chkstride1(Z)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, 3n)
+    else
+        length(work) < 3n && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    return spev!('V', uplo, n, AP, W, Z, max(1, stride(Z, 2)), work)
+end
+
+@pmalso function spev!(::Val{:N}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{R},Missing}=missing,
+    work::Union{<:AbstractVector{T},Missing}=missing,
+    rwork::Union{<:AbstractVector{R},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
+    require_one_based_indexing(AP)
+    chkstride1(AP)
+    if ismissing(W)
+        n = packedside(AP)
+        W = Vector{R}(undef, n)
+    else
+        n = length(W)
+        chkpacked(n, AP)
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, max(1, 2n -1))
+    else
+        length(work) < max(1, 2n -1) && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(rwork)
+        rwork = Vector{R}(undef, max(1, 3n -2))
+    else
+        length(rwork) < max(1, 3n -2) && throw(ArgumentError("The provided rwork space was too small"))
+        require_one_based_indexing(rwork)
+        chkstride1(rwork)
+    end
+    return spev!('N', uplo, n, AP, W, Ptr{T}(C_NULL), 1, work, rwork)[1]
+end
+
+@pmalso function spev!(::Val{:V}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{R},Missing}=missing,
+    Z::Union{<:AbstractMatrix{T},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing,
+    rwork::Union{<:AbstractVector{R},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
+    require_one_based_indexing(AP)
+    chkstride1(AP)
+    if ismissing(W)
+        n = packedside(AP)
+        W = Vector{R}(undef, n)
+    else
+        n = length(W)
+        chkpacked(n, AP)
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(Z)
+        Z = Matrix{T}(undef, n, n)
+    else
+        checksquare(Z) == n || throw(DimensionMismatch("The provided matrix was too small"))
+        require_one_based_indexing(Z)
+        chkstride1(Z)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, max(1, 2n -1))
+    else
+        length(work) < max(1, 2n -1) && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(rwork)
+        rwork = Vector{R}(undef, max(1, 3n -2))
+    else
+        length(rwork) < max(1, 3n -2) && throw(ArgumentError("The provided rwork space was too small"))
+        require_one_based_indexing(rwork)
+        chkstride1(rwork)
+    end
+    return spev!('V', uplo, n, AP, W, Z, max(1, stride(Z, 2)), work, rwork)
+end
+
+"""
+    spev!('N', uplo, AP::AbstractVector, W=missing, work=missing[, rwork=missing]) -> W
+    spev!('N', AP::PackedMatrixUnscaled, W=missing, work=missing[, rwork=missing]) -> W
+    spev!('V', uplo, AP::AbstractVector, W=missing, Z=missing, work=missing[, rwork=missing]) -> W, Z
+    spev!('V', AP::PackedMatrixUnscaled, W=missing, Z=missing, work=missing[, rwork=missing]) -> W, Z
+
+Finds the eigenvalues (first parameter `'N'`) or eigenvalues and eigenvectors (first parameter `'V'`) of a Hermitian matrix
+``A`` in packed storage `AP`. If `uplo = U`, `AP` is the upper triangle of ``A``. If `uplo = L`, `AP` is the lower triangle of
+``A``. The output vector `W` and matrix `Z`, as well as the temporaries `work` and `rwork` (in the complex case) may be
+specified to save allocations.
+"""
+spev!
+
+spevx!(jobz::AbstractChar, args...) = spevx!(Val(Symbol(jobz)), args...)
+@pmalso function spevx!(jobz::Val, uplo::AbstractChar, AP::PM{T}) where {T<:BlasFloat}
+    return spevx!(jobz, 'A', uplo, AP, nothing, nothing, nothing, nothing, _realtype(T)(-1))
+end
+
+@pmalso function spevx!(::Val{:N}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, vl::Union{Nothing,T},
+    vu::Union{Nothing,T}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::T,
+    W::Union{<:AbstractVector{T},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing,
+    iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {T<:BlasReal}
+    @nospecialize vl vu il iu
+    require_one_based_indexing(AP)
+    chkstride1(AP)
+    n = packedside(AP)
+    if ismissing(W)
+        W = Vector{T}(undef, range == 'I' ? iu - il + 1 : n)
+    else
+        if range == 'A'
+            length(W) ≥ n || throw(DimensionMismatch("W has length $(length(W)), but needs at least $n"))
+        elseif range == 'I'
+            length(W) ≥ iu - il +1 || throw(DimensionMismatch("W has length $(length(W)), but needs at least $(iu - il +1)"))
+        end
+        # we cannot check 'V'
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, 8n)
+    else
+        length(work) < 8n && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(iwork)
+        iwork = Vector{BlasInt}(undef, 5n)
+    else
+        length(iwork) < 5n && throw(ArgumentError("The provided iwork space was too small"))
+        require_one_based_indexing(iwork)
+        chkstride1(iwork)
+    end
+    m = Ref{BlasInt}()
+    spevx!('N', range, uplo, n, AP, vl, vu, il, iu, abstol, m, W, Ptr{T}(C_NULL), 1, work, iwork, Ptr{BlasInt}(C_NULL))
+    return @view(W[1:m[]])
+end
+
+@pmalso function spevx!(::Val{:V}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, vl::Union{Nothing,T},
+    vu::Union{Nothing,T}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::T,
+    W::Union{<:AbstractVector{T},Missing}=missing, Z::Union{<:AbstractMatrix{T},Missing}=missing,
+    work::Union{<:AbstractVector{T},Missing}=missing,
+    iwork::Union{<:AbstractVector{BlasInt},Missing}=missing,
+    ifail::Union{<:AbstractVector{BlasInt},Missing}=missing) where {T<:BlasReal}
+    @nospecialize vl vu il iu
+    require_one_based_indexing(AP)
+    chkstride1(AP)
+    n = packedside(AP)
+    if ismissing(W)
+        W = Vector{T}(undef, range == 'I' ? iu - il + 1 : n)
+    else
+        if range == 'A'
+            length(W) ≥ n || throw(DimensionMismatch("W has length $(length(W)), but needs at least $n"))
+        elseif range == 'I'
+            length(W) ≥ iu - il +1 || throw(DimensionMismatch("W has length $(length(W)), but needs at least $(iu - il +1)"))
+        end
+        # we cannot check 'V'
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(Z)
+        Z = Matrix{T}(undef, n, range == 'I' ? iu - il + 1 : n)
+    else
+        size(Z, 1) == n || throw(DimensionMismatch("Z has first dimension $(size(Z, 1)), but needs $n"))
+        if range == 'A'
+            size(Z, 2) ≥ n || throw(DimensionMismatch("Z has second dimension $(size(Z, 2)), but needs $n"))
+        elseif range == 'I'
+            size(Z, 2) ≥ iu - il +1 ||
+                throw(DimensionMismatch("Z has second dimension $(size(Z, 2)), but needs at least $(iu - il +1)"))
+        end
+        require_one_based_indexing(Z)
+        chkstride1(Z)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, 8n)
+    else
+        length(work) < 8n && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(iwork)
+        iwork = Vector{BlasInt}(undef, 5n)
+    else
+        length(iwork) < 5n && throw(ArgumentError("The provided iwork space was too small"))
+        require_one_based_indexing(iwork)
+        chkstride1(iwork)
+    end
+    if ismissing(ifail)
+        ifail = Vector{BlasInt}(undef, n)
+    else
+        length(ifail) < n && throw(DimensionMismatch("The provided ifail space was too small"))
+        require_one_based_indexing(ifail)
+        chkstride1(ifail)
+    end
+    m = Ref{BlasInt}()
+    _, _, info, _ = spevx!('V', range, uplo, n, AP, vl, vu, il, iu, abstol, m, W, Z, max(1, stride(Z, 2)), work, iwork, ifail)
+    return @view(W[1:m[]]), @view(Z[:, 1:m[]]), info, @view(ifail[1:m[]])
+end
+
+@pmalso function spevx!(::Val{:N}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, vl::Union{Nothing,R},
+    vu::Union{Nothing,R}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::R,
+    W::Union{<:AbstractVector{R},Missing}=missing,
+    work::Union{<:AbstractVector{T},Missing}=missing, rwork::Union{<:AbstractVector{R},Missing}=missing,
+    iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
+    @nospecialize vl vu il iu
+    require_one_based_indexing(AP)
+    chkstride1(AP)
+    n = packedside(AP)
+    if ismissing(W)
+        W = Vector{R}(undef, range == 'I' ? iu - il + 1 : n)
+    else
+        if range == 'A'
+            length(W) ≥ n || throw(DimensionMismatch("W has length $(length(W)), but needs at least $n"))
+        elseif range == 'I'
+            length(W) ≥ iu - il +1 || throw(DimensionMismatch("W has length $(length(W)), but needs at least $(iu - il +1)"))
+        end
+        # we cannot check 'V'
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, 2n)
+    else
+        length(work) < 2n && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(rwork)
+        rwork = Vector{R}(undef, 7n)
+    else
+        length(rwork) < 7n && throw(ArgumentError("The provided rwork space was too small"))
+        require_one_based_indexing(rwork)
+        chkstride1(rwork)
+    end
+    if ismissing(iwork)
+        iwork = Vector{BlasInt}(undef, 5n)
+    else
+        length(iwork) < 5n && throw(ArgumentError("The provided iwork space was too small"))
+        require_one_based_indexing(iwork)
+        chkstride1(iwork)
+    end
+    m = Ref{BlasInt}()
+    spevx!('N', range, uplo, n, AP, vl, vu, il, iu, abstol, m, W, Ptr{T}(C_NULL), 1, work, rwork, iwork, Ptr{BlasInt}(C_NULL))
+    return @view(W[1:m[]])
+end
+
+@pmalso function spevx!(::Val{:V}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, vl::Union{Nothing,R},
+    vu::Union{Nothing,R}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::R,
+    W::Union{<:AbstractVector{R},Missing}=missing, Z::Union{<:AbstractMatrix{T},Missing}=missing,
+    work::Union{<:AbstractVector{T},Missing}=missing, rwork::Union{<:AbstractVector{R},Missing}=missing,
+    iwork::Union{<:AbstractVector{BlasInt},Missing}=missing,
+    ifail::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
+    @nospecialize vl vu il iu
+    require_one_based_indexing(AP)
+    chkstride1(AP)
+    n = packedside(AP)
+    if ismissing(W)
+        W = Vector{R}(undef, range == 'I' ? iu - il + 1 : n)
+    else
+        if range == 'A'
+            length(W) ≥ n || throw(DimensionMismatch("W has length $(length(W)), but needs at least $n"))
+        elseif range == 'I'
+            length(W) ≥ iu - il +1 || throw(DimensionMismatch("W has length $(length(W)), but needs at least $(iu - il +1)"))
+        end
+        # we cannot check 'V'
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(Z)
+        Z = Matrix{R}(undef, n, range == 'I' ? iu - il + 1 : n)
+    else
+        size(Z, 1) == n || throw(DimensionMismatch("Z has first dimension $(size(Z, 1)), but needs $n"))
+        if range == 'A'
+            size(Z, 2) ≥ n || throw(DimensionMismatch("Z has second dimension $(size(Z, 2)), but needs $n"))
+        elseif range == 'I'
+            size(Z, 2) ≥ iu - il +1 ||
+                throw(DimensionMismatch("Z has second dimension $(size(Z, 2)), but needs at least $(iu - il +1)"))
+        end
+        require_one_based_indexing(Z)
+        chkstride1(Z)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, 2n)
+    else
+        length(work) < 2n && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(rwork)
+        rwork = Vector{R}(undef, 7n)
+    else
+        length(rwork) < 7n && throw(ArgumentError("The provided rwork space was too small"))
+        require_one_based_indexing(rwork)
+        chkstride1(rwork)
+    end
+    if ismissing(iwork)
+        iwork = Vector{BlasInt}(undef, 5n)
+    else
+        length(iwork) < 5n && throw(ArgumentError("The provided iwork space was too small"))
+        require_one_based_indexing(iwork)
+        chkstride1(iwork)
+    end
+    if ismissing(ifail)
+        ifail = Vector{BlasInt}(undef, n)
+    else
+        length(ifail) < n && throw(DimensionMismatch("The provided ifail space was too small"))
+        require_one_based_indexing(ifail)
+        chkstride1(ifail)
+    end
+    m = Ref{BlasInt}()
+    _, _, info, _ = spevx!('V', range, uplo, n, AP, vl, vu, il, iu, abstol, m, W, Z, max(1, stride(Z, 2)), work, rwork, iwork,
+        ifail)
+    return @view(W[1:m[]]), @view(Z[:, 1:m[]]), info, @view(ifail[])
+end
+
+"""
+    spevx!('N', range, uplo, AP::AbstractVector, vl, vu, il, iu, abstol, W=missing, work=missing,
+        [rwork=missing,] iwork=missing) -> view(W)
+    spevx!('N', range, AP::PackedMatrixUnscaled, vl, vu, il, iu, abstol, W=missing, work=missing,
+        [rwork=missing,] iwork=missing) -> view(W)
+    spevx!('V', range, uplo, AP::AbstractVector, vl, vu, il, iu, abstol, W=missing, Z=missing, work=missing,
+        [rwork=missing,] iwork=missing, ifail=missing)
+        -> view(W), view(Z), info, view(ifail)
+    spevx!('V', range, AP::PackedMatrixUnscaled, vl, vu, il, iu, abstol, W=missing, Z=missing, work=missing,
+        [rwork=missing,] iwork=missing, ifail=missing)
+        -> view(W), view(Z), info, view(ifail)
+
+Finds the eigenvalues (first parameter `'N'`) or eigenvalues and eigenvectors (first parameter `'V'`) of a Hermitian matrix
+``A`` in packed storage `AP`. If `uplo = U`, `AP` is the upper triangle of ``A``. If `uplo = L`, `AP` is the lower triangle of
+``A``. If `range = 'A'`, all the eigenvalues are found. If `range = 'V'`, the eigenvalues in the half-open interval `(vl, vu]`
+are found. If `range = 'I'`, the eigenvalues with indices between `il` and `iu` are found. `abstol` can be set as a tolerance
+for convergence. The output vector `W`, `ifail` and matrix `Z`, as well as the temporaries `work`, `rwork` (in the complex
+case), and `iwork` may be specified to save allocations.
+
+The eigenvalues are returned in `W` and the eigenvectors in `Z`. `info` is zero upon success or the number of eigenvalues that
+failed to converge; their indices are stored in `ifail`. The resulting views to the original data are sized according to the
+number of eigenvalues that fulfilled the bounds given by the range.
+"""
+spevx!
+
+spevd!(jobz::AbstractChar, args...) = spevd!(Val(Symbol(jobz)), args...)
+
+@pmalso function spevd!(::Val{:N}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{T},Missing}=missing,
+    work::Union{<:AbstractVector{T},Missing}=missing,
+    iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {T<:BlasReal}
+    require_one_based_indexing(AP)
+    chkstride1(AP)
+    if ismissing(W)
+        n = packedside(AP)
+        W = Vector{T}(undef, n)
+    else
+        n = length(W)
+        chkpacked(n, AP)
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, n ≤ 1 ? 1 : 2n)
+    else
+        length(work) < (n ≤ 1 ? 1 : 2n) && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(iwork)
+        iwork = Vector{BlasInt}(undef, 1)
+    else
+        length(iwork) < 1 && throw(ArgumentError("The provided iwork space was too small"))
+        require_one_based_indexing(iwork)
+        chkstride1(iwork)
+    end
+    return spevd!('N', uplo, n, AP, W, Ptr{T}(C_NULL), 1, work, length(work), iwork, length(iwork))[1]
+end
+
+@pmalso function spevd!(::Val{:V}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{T},Missing}=missing,
+    Z::Union{<:AbstractMatrix{T},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing,
+    iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {T<:BlasReal}
+    require_one_based_indexing(AP)
+    chkstride1(AP)
+    if ismissing(W)
+        n = packedside(AP)
+        W = Vector{T}(undef, n)
+    else
+        n = length(W)
+        chkpacked(n, AP)
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(Z)
+        Z = Matrix{T}(undef, n, n)
+    else
+        checksquare(Z) == n || throw(DimensionMismatch("The provided matrix was too small"))
+        require_one_based_indexing(Z)
+        chkstride1(Z)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, n ≤ 1 ? 1 : n^2 + 6n +1)
+    else
+        length(work) < (n ≤ 1 ? 1 : n^2 + 6n +1) && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(iwork)
+        iwork = Vector{BlasInt}(undef, 3 + 5n)
+    else
+        length(iwork) < 3 + 5n && throw(ArgumentError("The provided iwork space was too small"))
+        require_one_based_indexing(iwork)
+        chkstride1(iwork)
+    end
+    return spevd!('V', uplo, n, AP, W, Z, max(1, stride(Z, 2)), work, length(work), iwork, length(iwork))
+end
+
+@pmalso function spevd!(::Val{:N}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{R},Missing}=missing,
+    work::Union{<:AbstractVector{T},Missing}=missing, rwork::Union{<:AbstractVector{R},Missing}=missing,
+    iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
+    require_one_based_indexing(AP)
+    chkstride1(AP)
+    if ismissing(W)
+        n = packedside(AP)
+        W = Vector{R}(undef, n)
+    else
+        n = length(W)
+        chkpacked(n, AP)
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, n ≤ 1 ? 1 : n)
+    else
+        length(work) < (n ≤ 1 ? 1 : n) && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(rwork)
+        rwork = Vector{R}(undef, n ≤ 1 ? 1 : n)
+    else
+        length(rwork) < (n ≤ 1 ? 1 : n) && throw(ArgumentError("The provided rwork space was too small"))
+        require_one_based_indexing(rwork)
+        chkstride1(rwork)
+    end
+    if ismissing(iwork)
+        iwork = Vector{BlasInt}(undef, 1)
+    else
+        length(iwork) < 1 && throw(ArgumentError("The provided iwork space was too small"))
+        require_one_based_indexing(iwork)
+        chkstride1(iwork)
+    end
+    return spevd!('N', uplo, n, AP, W, Ptr{T}(C_NULL), 1, work, length(work), rwork, length(rwork), iwork, length(iwork))[1]
+end
+
+@pmalso function spevd!(::Val{:V}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{R},Missing}=missing,
+    Z::Union{<:AbstractMatrix{T},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing,
+    rwork::Union{<:AbstractVector{R},Missing}=missing,
+    iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
+    require_one_based_indexing(AP)
+    chkstride1(AP)
+    if ismissing(W)
+        n = packedside(AP)
+        W = Vector{R}(undef, n)
+    else
+        n = length(W)
+        chkpacked(n, AP)
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(Z)
+        Z = Matrix{T}(undef, n, n)
+    else
+        checksquare(Z) == n || throw(DimensionMismatch("The provided matrix was too small"))
+        require_one_based_indexing(Z)
+        chkstride1(Z)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, n ≤ 1 ? 1 : 2n)
+    else
+        length(work) < (n ≤ 1 ? 1 : 2n) && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(rwork)
+        rwork = Vector{R}(undef, n ≤ 1 ? 1 : 2n^2 + 5n +1)
+    else
+        length(rwork) < (n ≤ 1 ? 1 : 2n^2 + 5n +1) && throw(ArgumentError("The provided rwork space was too small"))
+        require_one_based_indexing(rwork)
+        chkstride1(rwork)
+    end
+    if ismissing(iwork)
+        iwork = Vector{BlasInt}(undef, 3 + 5n)
+    else
+        length(iwork) < 3 + 5n && throw(ArgumentError("The provided iwork space was too small"))
+        require_one_based_indexing(iwork)
+        chkstride1(iwork)
+    end
+    return spevd!('V', uplo, n, AP, W, Z, max(1, stride(Z, 2)), work, length(work), rwork, length(rwork), iwork, length(iwork))
+end
+
+"""
+    spevd!('N', uplo, AP::AbstractVector, W=missing, work=missing[, rwork=missing], iwork=missing) -> W
+    spevd!('N', AP::PackedMatrixUnscaled, W=missing, work=missing[, rwork=missing], iwork=missing) -> W
+    spevd!('V', uplo, AP::AbstractVector, W=missing, Z=missing, work=missing[, rwork=missing], iwork=missing)
+        -> W, Z
+    spevd!('V', AP::PackedMatrixUnscaled, W=missing, Z=missing, work=missing[, rwork=missing], iwork=missing)
+        -> W, Z
+
+Finds the eigenvalues (first parameter `'N'`) or eigenvalues and eigenvectors (first parameter `'V'`) of a Hermitian matrix
+``A`` in packed storage `AP`. If `uplo = U`, `AP` is the upper triangle of ``A``. If `uplo = L`, `AP` is the lower triangle of
+``A``. The output vector `W` and matrix `Z`, as well as the temporaries `work`, `rwork` (in the complex case), and `iwork` may
+be specified to save allocations.
+
+If eigenvectors are desired, it uses a divide and conquer algorithm.
+"""
+spevd!
+
+spgv!(itype::Integer, jobz::AbstractChar, args...) = spgv!(itype, Val(Symbol(jobz)), args...)
+
+@pmalso function spgv!(itype::Integer, ::Val{:N}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+    W::Union{<:AbstractVector{T},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing) where {T<:BlasReal}
+    require_one_based_indexing(AP, BP)
+    chkstride1(AP, BP)
+    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    if ismissing(W)
+        n = packedside(AP)
+        W = Vector{T}(undef, n)
+    else
+        n = length(W)
+        chkpacked(n, AP)
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, 3n)
+    else
+        length(work) < 3n && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    return spgv!(itype, 'N', uplo, n, AP, BP, W, Ptr{T}(C_NULL), 1, work)[1]
+end
+
+@pmalso function spgv!(itype::Integer, ::Val{:V}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+    W::Union{<:AbstractVector{T},Missing}=missing, Z::Union{<:AbstractMatrix{T},Missing}=missing,
+    work::Union{<:AbstractVector{T},Missing}=missing) where {T<:BlasReal}
+    require_one_based_indexing(AP, BP)
+    chkstride1(AP, BP)
+    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    if ismissing(W)
+        n = packedside(AP)
+        W = Vector{T}(undef, n)
+    else
+        n = length(W)
+        chkpacked(n, AP)
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(Z)
+        Z = Matrix{T}(undef, n, n)
+    else
+        checksquare(Z) == n || throw(DimensionMismatch("The provided matrix was too small"))
+        require_one_based_indexing(Z)
+        chkstride1(Z)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, 3n)
+    else
+        length(work) < 3n && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    return spgv!(itype, 'V', uplo, n, AP, BP, W, Z, max(1, stride(Z, 2)), work)
+end
+
+@pmalso function spgv!(itype::Integer, ::Val{:N}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+    W::Union{<:AbstractVector{R},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing,
+    rwork::Union{<:AbstractVector{R},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
+    require_one_based_indexing(AP, BP)
+    chkstride1(AP, BP)
+    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    if ismissing(W)
+        n = packedside(AP)
+        W = Vector{R}(undef, n)
+    else
+        n = length(W)
+        chkpacked(n, AP)
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, max(1, 2n -1))
+    else
+        length(work) < max(1, 2n -1) && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(rwork)
+        rwork = Vector{R}(undef, max(1, 3n -2))
+    else
+        length(rwork) < max(1, 3n -2) && throw(ArgumentError("The provided rwork space was too small"))
+        require_one_based_indexing(rwork)
+        chkstride1(rwork)
+    end
+    return spgv!(itype, 'N', uplo, n, AP, BP, W, Ptr{T}(C_NULL), 1, work, rwork)[1]
+end
+
+@pmalso function spgv!(itype::Integer, ::Val{:V}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+    W::Union{<:AbstractVector{R},Missing}=missing, Z::Union{<:AbstractMatrix{T},Missing}=missing,
+    work::Union{<:AbstractVector{T},Missing}=missing,
+    rwork::Union{<:AbstractVector{R},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
+    require_one_based_indexing(AP, BP)
+    chkstride1(AP, BP)
+    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    if ismissing(W)
+        n = packedside(AP)
+        W = Vector{R}(undef, n)
+    else
+        n = length(W)
+        chkpacked(n, AP)
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(Z)
+        Z = Matrix{T}(undef, n, n)
+    else
+        checksquare(Z) == n || throw(DimensionMismatch("The provided matrix was too small"))
+        require_one_based_indexing(Z)
+        chkstride1(Z)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, max(1, 2n -1))
+    else
+        length(work) < max(1, 2n -1) && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(rwork)
+        rwork = Vector{R}(undef, max(1, 3n -2))
+    else
+        length(rwork) < max(1, 3n -2) && throw(ArgumentError("The provided rwork space was too small"))
+        require_one_based_indexing(rwork)
+        chkstride1(rwork)
+    end
+    return spgv!(itype, 'V', uplo, n, AP, BP, W, Z, max(1, stride(Z, 2)), work, rwork)
+end
+
+@doc raw"""
+    spgv!(itype, 'N', uplo, AP::AbstractVector, BP::AbstractVector, W=missing, work=missing[, rwork=missing]) -> W
+    spgv!(itype, 'V', uplo, AP::AbstractVector, BP::AbstractVector, W=missing, Z=missing, work=missing[, rwork=missing])
+        -> W, Z
+    spgv!(itype, 'N', AP::PackedMatrixUnscaled, BP::PackedMatrixUnscaled, W=missing, work=missing[, rwork=missing]) -> W
+    spgv!(itype, 'V', AP::PackedMatrixUnscaled, BP::PackedMatrixUnscaled, W=missing, Z=missing, work=missing[, rwork=missing])
+        -> W, Z
+
+Finds the generalized eigenvalues (second parameter `'N'`) or eigenvalues and eigenvectors (second parameter `'V'`) of a
+Hermitian matrix ``A`` in packed storage `AP` and Hermitian positive-definite matrix ``B`` in packed storage `BP`. If
+`uplo = 'U'`, `AP` and `BP` are the upper triangles of ``A`` and ``B``, respectively. If `uplo = 'L'`, they are the lower
+triangles.
+
+- If `itype = 1`, the problem to solve is ``A x = \lambda B x``.
+- If `itype = 2`, the problem to solve is ``A B x = \lambda x``.
+- If `itype = 3`, the problem to solve is ``B A x = \lambda x``.
+
+The output vector `W` and matrix `Z`, as well as the temporaries `work` and `rwork` (in the complex case) may be specified to
+save allocations.
+"""
+spgv!
+
+spgvx!(itype::Integer, jobz::AbstractChar, args...) = spgvx!(itype, Val(Symbol(jobz)), args...)
+@pmalso function spgvx!(itype::Integer, jobz::Val, uplo::AbstractChar, AP::PM{T}, BP::PM{T}) where {T<:BlasFloat}
+    return spgvx!(itype, jobz, 'A', uplo, AP, BP, nothing, nothing, nothing, nothing, _realtype(T)(-1))
+end
+
+@pmalso function spgvx!(itype::Integer, ::Val{:N}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+    vl::Union{Nothing,T}, vu::Union{Nothing,T}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer},
+    abstol::T, W::Union{<:AbstractVector{R},Missing}=missing,
+    work::Union{<:AbstractVector{T},Missing}=missing,
+    iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
+    @nospecialize vl vu il iu
+    require_one_based_indexing(AP, BP)
+    chkstride1(AP, BP)
+    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    n = packedside(AP)
+    if ismissing(W)
+        W = Vector{T}(undef, range == 'I' ? iu - il + 1 : n)
+    else
+        if range == 'A'
+            length(W) ≥ n || throw(DimensionMismatch("W has length $(length(W)), but needs at least $n"))
+        elseif range == 'I'
+            length(W) ≥ iu - il +1 || throw(DimensionMismatch("W has length $(length(W)), but needs at least $(iu - il +1)"))
+        end
+        # we cannot check 'V'
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, 8n)
+    else
+        length(work) < 8n && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(iwork)
+        iwork = Vector{BlasInt}(undef, 5n)
+    else
+        length(iwork) < 5n && throw(ArgumentError("The provided iwork space was too small"))
+        require_one_based_indexing(iwork)
+        chkstride1(iwork)
+    end
+    m = Ref{BlasInt}()
+    spgvx!(itype, 'N', range, uplo, n, AP, BP, vl, vu, il, iu, abstol, m, W, Ptr{T}(C_NULL), 1, work, iwork,
+        Ptr{BlasInt}(C_NULL))
+    return @view(W[1:m[]])
+end
+
+@pmalso function spgvx!(itype::Integer, ::Val{:V}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+    vl::Union{Nothing,T}, vu::Union{Nothing,T}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::T,
+    W::Union{<:AbstractVector{T},Missing}=missing, Z::Union{<:AbstractMatrix{T},Missing}=missing,
+    work::Union{<:AbstractVector{T},Missing}=missing, iwork::Union{<:AbstractVector{BlasInt},Missing}=missing,
+    ifail::Union{<:AbstractVector{BlasInt},Missing}=missing) where {T<:BlasReal}
+    @nospecialize vl vu il iu
+    require_one_based_indexing(AP, BP)
+    chkstride1(AP, BP)
+    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    n = packedside(AP)
+    if ismissing(W)
+        W = Vector{T}(undef, range == 'I' ? iu - il + 1 : n)
+    else
+        if range == 'A'
+            length(W) ≥ n || throw(DimensionMismatch("W has length $(length(W)), but needs at least $n"))
+        elseif range == 'I'
+            length(W) ≥ iu - il +1 || throw(DimensionMismatch("W has length $(length(W)), but needs at least $(iu - il +1)"))
+        end
+        # we cannot check 'V'
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(Z)
+        Z = Matrix{T}(undef, n, range == 'I' ? iu - il + 1 : n)
+    else
+        size(Z, 1) == n || throw(DimensionMismatch("Z has first dimension $(size(Z, 1)), but needs $n"))
+        if range == 'A'
+            size(Z, 2) ≥ n || throw(DimensionMismatch("Z has second dimension $(size(Z, 2)), but needs $n"))
+        elseif range == 'I'
+            size(Z, 2) ≥ iu - il +1 ||
+                throw(DimensionMismatch("Z has second dimension $(size(Z, 2)), but needs at least $(iu - il +1)"))
+        end
+        require_one_based_indexing(Z)
+        chkstride1(Z)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, 8n)
+    else
+        length(work) < 8n && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(iwork)
+        iwork = Vector{BlasInt}(undef, 5n)
+    else
+        length(iwork) < 5n && throw(ArgumentError("The provided iwork space was too small"))
+        require_one_based_indexing(iwork)
+        chkstride1(iwork)
+    end
+    if ismissing(ifail)
+        ifail = Vector{BlasInt}(undef, n)
+    else
+        length(ifail) < n && throw(DimensionMismatch("The provided ifail space was too small"))
+        require_one_based_indexing(ifail)
+        chkstride1(ifail)
+    end
+    m = Ref{BlasInt}()
+    _, _, info, _ = spgvx!(itype, 'V', range, uplo, n, AP, BP, vl, vu, il, iu, abstol, m, W, Z, max(1, stride(Z, 2)), work,
+        iwork, ifail)
+    return @view(W[1:m[]]), @view(Z[:, 1:m[]]), info, @view(ifail[1:m[]])
+end
+
+@pmalso function spgvx!(itype::Integer, ::Val{:N}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+    vl::Union{Nothing,R}, vu::Union{Nothing,R}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::R,
+    W::Union{<:AbstractVector{R},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing,
+    rwork::Union{<:AbstractVector{R},Missing}=missing,
+    iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
+    @nospecialize vl vu il iu
+    require_one_based_indexing(AP, BP)
+    chkstride1(AP, BP)
+    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    n = packedside(AP)
+    if ismissing(W)
+        W = Vector{R}(undef, range == 'I' ? iu - il + 1 : n)
+    else
+        if range == 'A'
+            length(W) ≥ n || throw(DimensionMismatch("W has length $(length(W)), but needs at least $n"))
+        elseif range == 'I'
+            length(W) ≥ iu - il +1 || throw(DimensionMismatch("W has length $(length(W)), but needs at least $(iu - il +1)"))
+        end
+        # we cannot check 'V'
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, 2n)
+    else
+        length(work) < 2n && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(rwork)
+        rwork = Vector{R}(undef, 7n)
+    else
+        length(rwork) < 7n && throw(ArgumentError("The provided rwork space was too small"))
+        require_one_based_indexing(rwork)
+        chkstride1(rwork)
+    end
+    if ismissing(iwork)
+        iwork = Vector{BlasInt}(undef, 5n)
+    else
+        length(iwork) < 5n && throw(ArgumentError("The provided iwork space was too small"))
+        require_one_based_indexing(iwork)
+        chkstride1(iwork)
+    end
+    m = Ref{BlasInt}()
+    spgvx!(itype, 'N', range, uplo, n, AP, BP, vl, vu, il, iu, abstol, m, W, Ptr{T}(C_NULL), 1, work, rwork, iwork,
+        Ptr{BlasInt}(C_NULL))
+    return @view(W[1:m[]])
+end
+
+@pmalso function spgvx!(itype::Integer, ::Val{:V}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+    vl::Union{Nothing,R}, vu::Union{Nothing,R}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::R,
+    W::Union{<:AbstractVector{R},Missing}=missing, Z::Union{<:AbstractMatrix{T},Missing}=missing,
+    work::Union{<:AbstractVector{T},Missing}=missing, rwork::Union{<:AbstractVector{R},Missing}=missing,
+    iwork::Union{<:AbstractVector{BlasInt},Missing}=missing,
+    ifail::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
+    @nospecialize vl vu il iu
+    require_one_based_indexing(AP, BP)
+    chkstride1(AP, BP)
+    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    n = packedside(AP)
+    if ismissing(W)
+        W = Vector{R}(undef, range == 'I' ? iu - il + 1 : n)
+    else
+        if range == 'A'
+            length(W) ≥ n || throw(DimensionMismatch("W has length $(length(W)), but needs at least $n"))
+        elseif range == 'I'
+            length(W) ≥ iu - il +1 || throw(DimensionMismatch("W has length $(length(W)), but needs at least $(iu - il +1)"))
+        end
+        # we cannot check 'V'
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(Z)
+        Z = Matrix{T}(undef, n, range == 'I' ? iu - il + 1 : n)
+    else
+        size(Z, 1) == n || throw(DimensionMismatch("Z has first dimension $(size(Z, 1)), but needs $n"))
+        if range == 'A'
+            size(Z, 2) ≥ n || throw(DimensionMismatch("Z has second dimension $(size(Z, 2)), but needs $n"))
+        elseif range == 'I'
+            size(Z, 2) ≥ iu - il +1 ||
+                throw(DimensionMismatch("Z has second dimension $(size(Z, 2)), but needs at least $(iu - il +1)"))
+        end
+        require_one_based_indexing(Z)
+        chkstride1(Z)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, 2n)
+    else
+        length(work) < 2n && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(rwork)
+        rwork = Vector{R}(undef, 7n)
+    else
+        length(rwork) < 7n && throw(ArgumentError("The provided rwork space was too small"))
+        require_one_based_indexing(rwork)
+        chkstride1(rwork)
+    end
+    if ismissing(iwork)
+        iwork = Vector{BlasInt}(undef, 5n)
+    else
+        length(iwork) < 5n && throw(ArgumentError("The provided iwork space was too small"))
+        require_one_based_indexing(iwork)
+        chkstride1(iwork)
+    end
+    if ismissing(ifail)
+        ifail = Vector{BlasInt}(undef, n)
+    else
+        length(ifail) < n && throw(DimensionMismatch("The provided ifail space was too small"))
+        require_one_based_indexing(ifail)
+        chkstride1(ifail)
+    end
+    m = Ref{BlasInt}()
+    _, _, info, _ = spgvx!(itype, 'V', range, uplo, n, AP, BP, vl, vu, il, iu, abstol, m, W, Z, max(1, stride(Z, 2)), work,
+        rwork, iwork, ifail)
+    return @view(W[1:m[]]), @view(Z[:, 1:m[]]), info, @view(ifail[])
+end
+
+@doc raw"""
+    spgvx!(itype, 'N', range, uplo, AP::AbstractVector, BP::AbstractVector, vl, vu, il, iu, abstol, W=missing, work=missing,
+        [rwork=missing,] iwork=missing) -> view(W)
+    spgvx!(itype, 'V', range, uplo, AP::AbstractVector, BP::AbstractVector, vl, vu, il, iu, abstol, W=missing, Z=missing,
+        work=missing[, rwork=missing], iwork=missing, ifail=missing)
+        -> view(W), view(Z), info, view(ifail)
+    spgvx!(itype, 'N', range, AP::PackedMatrixUnscaled, BP::PackedMatrixUnscaled, vl, vu, il, iu, abstol, W=missing, work=missing,
+        [rwork=missing,] iwork=missing) -> view(W)
+    spgvx!(itype, 'V', range, AP::PackedMatrixUnscaled, BP::PackedMatrixUnscaled, vl, vu, il, iu, abstol, W=missing, Z=missing,
+        work=missing[, rwork=missing], iwork=missing, ifail=missing)
+        -> view(W), view(Z), info, view(ifail)
+
+Finds the generalized eigenvalues (second parameter `'N'`) or eigenvalues and eigenvectors (second parameter `'V'`) of a
+Hermitian matrix ``A`` in packed storage `AP` and Hermitian positive-definite matrix ``B`` in packed storage `BP`. If
+`uplo = U`, `AP` and `BP` are the upper triangles of ``A`` and ``B``, respectively. If `uplo = L`, they are the lower
+triangles. If `range = 'A'`, all the eigenvalues are found. If `range = 'V'`, the eigenvalues in the half-open interval
+`(vl, vu]` are found. If `range = 'I'`, the eigenvalues with indices between `il` and `iu` are found. `abstol` can be set as a
+tolerance for convergence. The output vector `W`, `ifail` and matrix `Z`, as well as the temporaries `work`, `rwork` (in the
+complex case), and `iwork` may be specified to save allocations.
+
+- If `itype = 1`, the problem to solve is ``A x = \lambda B x``.
+- If `itype = 2`, the problem to solve is ``A B x = \lambda x``.
+- If `itype = 3`, the problem to solve is ``B A x = \lambda x``.
+
+The eigenvalues are returned in `W` and the eigenvectors in `Z`. `info` is zero upon success or the number of eigenvalues that
+failed to converge; their indices are stored in `ifail`. The resulting views to the original data are sized according to the
+number of eigenvalues that fulfilled the bounds given by the range.
+"""
+spgvx!
+
+spgvd!(itype::Integer, jobz::AbstractChar, args...) = spgvd!(itype, Val(Symbol(jobz)), args...)
+
+@pmalso function spgvd!(itype::Integer, ::Val{:N}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+    W::Union{<:AbstractVector{T},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing,
+    iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {T<:BlasReal}
+    require_one_based_indexing(AP, BP)
+    chkstride1(AP, BP)
+    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    if ismissing(W)
+        n = packedside(AP)
+        W = Vector{T}(undef, n)
+    else
+        n = length(W)
+        chkpacked(n, AP)
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, n ≤ 1 ? 1 : 2n)
+    else
+        length(work) < (n ≤ 1 ? 1 : 2n) && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(iwork)
+        iwork = Vector{BlasInt}(undef, 1)
+    else
+        length(iwork) < 1 && throw(ArgumentError("The provided iwork space was too small"))
+        require_one_based_indexing(iwork)
+        chkstride1(iwork)
+    end
+    return spgvd!(itype, 'N', uplo, n, AP, BP, W, Ptr{T}(C_NULL), 1, work, length(work), iwork, length(iwork))[1]
+end
+
+@pmalso function spgvd!(itype::Integer, ::Val{:V}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+    W::Union{<:AbstractVector{T},Missing}=missing, Z::Union{<:AbstractMatrix{T},Missing}=missing,
+    work::Union{<:AbstractVector{T},Missing}=missing,
+    iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {T<:BlasReal}
+    require_one_based_indexing(AP, BP)
+    chkstride1(AP, BP)
+    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    if ismissing(W)
+        n = packedside(AP)
+        W = Vector{T}(undef, n)
+    else
+        n = length(W)
+        chkpacked(n, AP)
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(Z)
+        Z = Matrix{T}(undef, n, n)
+    else
+        checksquare(Z) == n || throw(DimensionMismatch("The provided matrix was too small"))
+        require_one_based_indexing(Z)
+        chkstride1(Z)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, n ≤ 1 ? 1 : n^2 + 6n +1)
+    else
+        length(work) < (n ≤ 1 ? 1 : n^2 + 6n +1) && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(iwork)
+        iwork = Vector{BlasInt}(undef, 3 + 5n)
+    else
+        length(iwork) < 3 + 5n && throw(ArgumentError("The provided iwork space was too small"))
+        require_one_based_indexing(iwork)
+        chkstride1(iwork)
+    end
+    return spgvd!(itype, 'V', uplo, n, AP, BP, W, Z, max(1, stride(Z, 2)), work, length(work), iwork, length(iwork))
+end
+
+@pmalso function spgvd!(itype::Integer, ::Val{:N}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+    W::Union{<:AbstractVector{R},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing,
+    rwork::Union{<:AbstractVector{R},Missing}=missing,
+    iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
+    require_one_based_indexing(AP, BP)
+    chkstride1(AP, BP)
+    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    if ismissing(W)
+        n = packedside(AP)
+        W = Vector{R}(undef, n)
+    else
+        n = length(W)
+        chkpacked(n, AP)
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, n ≤ 1 ? 1 : n)
+    else
+        length(work) < (n ≤ 1 ? 1 : n) && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(rwork)
+        rwork = Vector{R}(undef, n ≤ 1 ? 1 : n)
+    else
+        length(rwork) < (n ≤ 1 ? 1 : n) && throw(ArgumentError("The provided rwork space was too small"))
+        require_one_based_indexing(rwork)
+        chkstride1(rwork)
+    end
+    if ismissing(iwork)
+        iwork = Vector{BlasInt}(undef, 1)
+    else
+        length(iwork) < 1 && throw(ArgumentError("The provided iwork space was too small"))
+        require_one_based_indexing(iwork)
+        chkstride1(iwork)
+    end
+    return spgvd!(itype, 'N', uplo, n, AP, BP, W, Ptr{T}(C_NULL), 1, work, length(work), rwork, length(rwork), iwork,
+        length(iwork))[1]
+end
+
+@pmalso function spgvd!(itype::Integer, ::Val{:V}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+    W::Union{<:AbstractVector{R},Missing}=missing, Z::Union{<:AbstractMatrix{T},Missing}=missing,
+    work::Union{<:AbstractVector{T},Missing}=missing, rwork::Union{<:AbstractVector{R},Missing}=missing,
+    iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
+    require_one_based_indexing(AP, BP)
+    chkstride1(AP, BP)
+    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    if ismissing(W)
+        n = packedside(AP)
+        W = Vector{R}(undef, n)
+    else
+        n = length(W)
+        chkpacked(n, AP)
+        require_one_based_indexing(W)
+        chkstride1(AP, W)
+    end
+    if ismissing(Z)
+        Z = Matrix{T}(undef, n, n)
+    else
+        checksquare(Z) == n || throw(DimensionMismatch("The provided matrix was too small"))
+        require_one_based_indexing(Z)
+        chkstride1(Z)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, n ≤ 1 ? 1 : 2n)
+    else
+        length(work) < (n ≤ 1 ? 1 : 2n) && throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    if ismissing(rwork)
+        rwork = Vector{R}(undef, n ≤ 1 ? 1 : 2n^2 + 5n +1)
+    else
+        length(rwork) < (n ≤ 1 ? 1 : 2n^2 + 5n +1) && throw(ArgumentError("The provided rwork space was too small"))
+        require_one_based_indexing(rwork)
+        chkstride1(rwork)
+    end
+    if ismissing(iwork)
+        iwork = Vector{BlasInt}(undef, 3 + 5n)
+    else
+        length(iwork) < 3 + 5n && throw(ArgumentError("The provided iwork space was too small"))
+        require_one_based_indexing(iwork)
+        chkstride1(iwork)
+    end
+    return spgvd!(itype, 'V', uplo, n, AP, BP, W, Z, max(1, stride(Z, 2)), work, length(work), rwork, length(rwork), iwork,
+        length(iwork))
+end
+
+@doc raw"""
+    spgvd!(itype, 'N', uplo, AP::AbstractVector, BP::AbstractVector, W=missing, work=missing[, rwork=missing], iwork=missing)
+        -> W
+    spgvd!(itype, 'V', uplo, AP::AbstractVector, BP::AbstractVector, W=missing, Z=missing, work=missing[, rwork=missing],
+        iwork=missing) -> W, Z
+    spgvd!(itype, 'N', AP::PackedMatrixUnscaled, BP::PackedMatrixUnscaled, W=missing, work=missing[, rwork=missing], iwork=missing)
+        -> W
+    spgvd!(itype, 'V', AP::PackedMatrixUnscaled, BP::PackedMatrixUnscaled, W=missing, Z=missing, work=missing[, rwork=missing],
+        iwork=missing) -> W, Z
+
+Finds the generalized eigenvalues (second parameter `'N'`) or eigenvalues and eigenvectors (second parameter `'V'`) of a
+Hermitian matrix ``A`` in packed storage `AP` and Hermitian positive-definite matrix ``B`` in packed storage `BP`.
+If `uplo = U`, `AP` and `BP` are the upper triangles of ``A``, and ``B``, respectively. If `uplo = L`, they are the lower
+triangles.
+
+- If `itype = 1`, the problem to solve is ``A x = \lambda B x``.
+- If `itype = 2`, the problem to solve is ``A B x = \lambda x``.
+- If `itype = 3`, the problem to solve is ``B A x = \lambda x``.
+
+The output vector `W` and matrix `Z`, as well as the temporaries `work`, `rwork` (in the complex case), and `iwork` may be
+specified to save allocations.
+
+If eigenvectors are desired, it uses a divide and conquer algorithm.
+"""
+spgvd!
+
+@pmalso function hptrd!(uplo::AbstractChar, AP::PM{T}, D::Union{<:AbstractVector{R},Missing}=missing,
+    E::Union{<:AbstractVector{R},Missing}=missing,
+    τ::Union{<:AbstractVector{T},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
+    require_one_based_indexing(AP)
+    chkstride1(AP)
+    if ismissing(D)
+        n = packedside(AP)
+        D = Vector{R}(undef, n)
+    else
+        n = length(D)
+        chkpacked(n, AP)
+        require_one_based_indexing(D)
+        chkstride1(D)
+    end
+    if ismissing(E)
+        E = Vector{R}(undef, n -1)
+    else
+        length(E) == n -1 || throw(DimensionMismatch("E has length $(length(E)), but needs $(n-1)"))
+        require_one_based_indexing(E)
+        chkstride1(E)
+    end
+    if ismissing(τ)
+        τ = Vector{R}(undef, n -1)
+    else
+        length(τ) == n -1 || throw(DimensionMismatch("τ has length $(length(τ)), but needs $(n-1)"))
+        require_one_based_indexing(τ)
+        chkstride1(τ)
+    end
+    return hptrd!(uplo, n, AP, D, E, τ)
+end
+
+"""
+    hptrd!(uplo, AP::AbstractVector, D=missing, E=missing, τ=missing) -> (A, τ, D, E)
+    hptrd!(AP::PackedMatrixUnscaled, D=missing, E=missing, τ=missing) -> (A, τ, D, E)
+
+`hptrd!` reduces a Hermitian matrix ``A`` stored in packed form `AP` to real-symmetric tridiagonal form ``T`` by an orthogonal
+similarity transformation: ``Q' A Q = T``.
+If `uplo = U`, `AP` is the upper triangle of ``A``, else it is the lower triangle.
+
+On exit, if `uplo = 'U'`, the diagonal and first superdiagonal of ``A`` are overwritten by the corresponding elements of the
+tridiagonal matrix ``T``, and the elements above the first superdiagonal, with the array `τ`, represent the orthogonal matrix
+``Q`` as a product of elementary reflectors. If `uplo = 'L'` the diagonal and first subdiagonal of ``A`` are over-written by
+the corresponding elements of the tridiagonal matrix ``T``, and the elements below the first subdiagonal, with the array `τ`,
+represent the orthogonal matrix ``Q`` as a product of elementary reflectors.
+
+`tau` contains the scalar factors of the elementary reflectors, `D` contains the diagonal elements of ``T`` and `E` contains
+the off-diagonal elements of ``T``.
+
+The output vectors `D`, `E`, and `τ` may be specified to save allocations.
+"""
+hptrd!
+
+@pmalso function opgtr!(uplo::AbstractChar, AP::PM{T}, τ::AbstractVector{T}, Q::Union{<:AbstractMatrix{T},Missing}=missing,
+    work::Union{<:AbstractVector{T},Missing}=missing) where {T<:BlasFloat}
+    require_one_based_indexing(AP, τ)
+    chkstride1(AP, τ)
+    n = length(τ) +1
+    chkpacked(n, AP)
+    if ismissing(Q)
+        Q = Matrix{T}(undef, n, n)
+    else
+        checksquare(Q) == n || throw(DimensionMismatch("Q has size $(size(Q)), but needs ($n, $n)"))
+        require_one_based_indexing(Q)
+        chkstride1(Q)
+    end
+    if ismissing(work)
+        work = Vector{T}(undef, n -1)
+    else
+        length(work) ≥ n -1 || throw(ArgumentError("The provided work space was too small"))
+        require_one_based_indexing(work)
+        chkstride1(work)
+    end
+    return opgtr!(uplo, n, AP, τ, Q, max(1, stride(Q, 2)), work)
+end
+
+"""
+    opgtr!(uplo, AP::AbstractVector, τ, Q=missing, work=missing)
+    opgtr!(AP::PackedMatrixUnscaled, τ, Q=missing, work=missing)
+
+Explicitly finds `Q`, the orthogonal/unitary matrix from [`hptrd!`](@ref). `uplo`, `AP`, and `τ` must correspond to the
+input/output to `hptrd!`.
+
+The output matrix `Q` and the temporary `work` may be specified to save allocations.
+"""
+opgtr!
+
+@pmalso function opmtr!(side::AbstractChar, uplo::AbstractChar, trans::AbstractChar, AP::PM{T}, τ::AbstractVector{T},
+    C::AbstractMatrix{T}, work::Union{<:AbstractVector{T},Missing}=missing) where {T<:BlasFloat}
+    require_one_based_indexing(AP, τ, C)
+    chkstride1(AP, τ, C)
+    m, n = size(C)
+    if side == 'L'
+        chkpacked(m, AP)
+        length(τ) == m -1 || throw(DimensionMismatch("τ has length $(length(τ)), needs $(m -1)"))
+        if ismissing(work)
+            work = Vector{T}(undef, n)
+        else
+            length(work) ≥ n || throw(ArgumentError("The provided work space was too small"))
+            require_one_based_indexing(work)
+            chkstride1(work)
+        end
+    else
+        chkpacked(n, AP)
+        length(τ) == n -1 || throw(DimensionMismatch("τ has length $(length(τ)), needs $(n -1)"))
+        if ismissing(work)
+            work = Vector{T}(undef, m)
+        else
+            length(work) ≥ m || throw(ArgumentError("The provided work space was too small"))
+            require_one_based_indexing(work)
+            chkstride1(work)
+        end
+    end
+    return opmtr!(side, uplo, trans, m, n, AP, τ, C, max(1, stride(C, 2)), work)
+end
+
+@doc raw"""
+    opmtr!(side, uplo, trans, AP::AbstractVector, τ, C, work=missing)
+    opmtr!(side, trans, AP::PackedMatrixUnscaled, τ, C, work=missing)
+
+`opmtr!` overwrites the general ``m \times n`` matrix `C` with
+
+|                                       | `SIDE = 'L'` | `SIDE = 'R'` |
+| ---:                                  | :---:        | :---:        |
+| `TRANS = 'N'`                         | ``Q C``      | ``C Q``      |
+| `TRANS = 'T'` or `'C'` (complex case) | ``Q' C``     | ``C Q'``     |
+
+where ``Q`` is a real orthogonal or complex unitary matrix of order ``\mathit{nq}``, with ``\mathit{nq} = m`` if `SIDE = 'L'`
+and ``\mathit{nq} = n`` if `SIDE = 'R'`. ``Q`` is defined as the product of ``\mathit{nq} -1`` elementary reflectors, as
+returned by [`hptrd!`](@ref) using packed storage:
+- if `UPLO = 'U'`, ``Q = H_{\mathit{nq} -1} \dotsm H_2 H_1``;
+- if `UPLO = 'L'`, ``Q = H_1 H_2 \dotsm H_{\mathit{nq} -1}``.
+
+The temporary `work` may be specified to save allocations.
+"""
+opmtr!

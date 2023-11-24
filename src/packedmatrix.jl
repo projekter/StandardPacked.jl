@@ -4,7 +4,7 @@ export PackedMatrix, PackedMatrixUpper, PackedMatrixLower, PackedMatrixUnscaled,
 """
     PackedMatrix{R,V,Fmt}
 
-Two-dimensional dense symmetric square matrix in packed storage. Depending on Fmt, we only store the upper or lower triangle
+Two-dimensional dense Hermitian square matrix in packed storage. Depending on Fmt, we only store the upper or lower triangle
 in col-major vectorized or scaled vectorized form.
 
 !!! warning
@@ -50,6 +50,7 @@ end
 
 Base.size(P::PackedMatrix) = (P.dim, P.dim)
 Base.eltype(::PackedMatrix{R}) where {R} = R
+Base.require_one_based_indexing(P::PackedMatrix) = Base.require_one_based_indexing(P.data)
 
 """
     PackedMatrixUpper{R,V}
@@ -79,13 +80,14 @@ const PackedMatrixScaled{R,V} = Union{PackedMatrix{R,V,:US},PackedMatrix{R,V,:LS
 packed_format(::PackedMatrix{R,V,Fmt}) where {R,V,Fmt} = Fmt
 """
     packed_isupper(::PackedMatrix)
+    packed_isupper(::Type{<:PackedMatrix})
 
 Returns `true` iff the given packed matrix has upper triangular storage.
 
 See also [`packed_islower`](@ref), [`packed_isscaled`](@ref).
 """
-packed_isupper(::PackedMatrixUpper) = true
-packed_isupper(::PackedMatrixLower) = false
+packed_isupper(::Union{U,Type{U}} where {U<:PackedMatrixUpper}) = true
+packed_isupper(::Union{L,Type{L}} where {L<:PackedMatrixLower}) = false
 packed_isupper(s::Symbol) = s == :U || s == :US
 """
     packed_islower(::PackedMatrix)
@@ -94,8 +96,8 @@ Returns `true` iff the given packed matrix has lower triangular storage.
 
 See also [`packed_isupper`](@ref), [`packed_isscaled`](@ref).
 """
-packed_islower(::PackedMatrixUpper) = false
-packed_islower(::PackedMatrixLower) = true
+packed_islower(::Union{U,Type{U}} where {U<:PackedMatrixUpper}) = false
+packed_islower(::Union{L,Type{L}} where {L<:PackedMatrixLower}) = true
 packed_islower(s::Symbol) = s == :L || s == :LS
 @doc raw"""
     packed_isscaled(::PackedMatrix)
@@ -105,8 +107,8 @@ scaling of ``\sqrt2``.
 
 See also [`packed_isupper`](@ref), [`packed_islower`](@ref).
 """
-packed_isscaled(::PackedMatrixUnscaled) = false
-packed_isscaled(::PackedMatrixScaled) = true
+packed_isscaled(::Union{U,Type{U}} where {U<:PackedMatrixUnscaled}) = false
+packed_isscaled(::Union{S,Type{S}} where {S<:PackedMatrixScaled}) = true
 packed_isscaled(s::Symbol) = s == :US || s == :LS
 packed_ulchar(x) = packed_isupper(x) ? 'U' : 'L'
 
@@ -146,16 +148,26 @@ Returns the value that is stored in the given row and column of `P`. This corres
 `P` is of a scaled type, this does not affect the result.
 """
 Base.@propagate_inbounds Base.getindex(P::PackedMatrix{R,V,:U}, row, col) where {R,V} =
-    P.data[@inbounds rowcol_to_vec(P, min(row, col), max(row, col))]
+    row ≤ col ? P.data[@inbounds rowcol_to_vec(P, row, col)] : conj(P.data[@inbounds rowcol_to_vec(P, col, row)])
 Base.@propagate_inbounds function Base.getindex(P::PackedMatrix{R,V,:US}, row, col) where {R,V}
-    val = P.data[@inbounds rowcol_to_vec(P, min(row, col), max(row, col))]
-    return row == col ? val : sqrt(inv(R(2))) * val
+    if row < col
+        return sqrt(inv(R(2))) * P.data[@inbounds rowcol_to_vec(P, row, col)]
+    elseif row == col
+        return P.data[@inbounds rowcol_to_vec(P, row, col)]
+    else
+        return sqrt(inv(R(2))) * conj(P.data[@inbounds rowcol_to_vec(P, col, row)])
+    end
 end
 Base.@propagate_inbounds Base.getindex(P::PackedMatrix{R,V,:L}, row, col) where {R,V} =
-    P.data[@inbounds rowcol_to_vec(P, max(row, col), min(row, col))]
+    col ≤ row ? P.data[@inbounds rowcol_to_vec(P, row, col)] : conj(P.data[@inbounds rowcol_to_vec(P, col, row)])
 Base.@propagate_inbounds function Base.getindex(P::PackedMatrix{R,V,:LS}, row, col) where {R,V}
-    val = P.data[@inbounds rowcol_to_vec(P, max(row, col), min(row, col))]
-    return row == col ? val : sqrt(inv(R(2))) * val
+    if row > col
+        return sqrt(inv(R(2))) * P.data[@inbounds rowcol_to_vec(P, row, col)]
+    elseif row == col
+        return P.data[@inbounds rowcol_to_vec(P, row, col)]
+    else
+        return sqrt(inv(R(2))) * conj(P.data[@inbounds rowcol_to_vec(P, col, row)])
+    end
 end
 """
     P[idx] = X
@@ -169,18 +181,40 @@ Base.@propagate_inbounds Base.setindex!(P::PackedMatrix, X, idx::Union{Integer,L
 Sets the value that is stored in the given row and column of `P`. This corresponds to the value in the matrix, so if `P` is of
 a scaled type, `X` will internally be multiplied by ``\sqrt2``.
 """
-Base.@propagate_inbounds Base.setindex!(P::PackedMatrix{R,V,:U}, X, row, col) where {R,V} =
-    P.data[@inbounds rowcol_to_vec(P, min(row, col), max(row, col))] = X
-Base.@propagate_inbounds function Base.setindex!(P::PackedMatrix{R,V,:US}, X, row, col) where {R,V}
-    Xsc = row == col ? X : sqrt(R(2)) * X
-    P.data[@inbounds rowcol_to_vec(P, min(row, col), max(row, col))] = Xsc
+Base.@propagate_inbounds function Base.setindex!(P::PackedMatrix{R,V,:U}, X, row, col) where {R,V}
+    if row ≤ col
+        P.data[@inbounds rowcol_to_vec(P, row, col)] = X
+    else
+        P.data[@inbounds rowcol_to_vec(P, col, row)] = conj(X)
+    end
     return X
 end
-Base.@propagate_inbounds Base.setindex!(P::PackedMatrix{R,V,:L}, X, row, col) where {R,V} =
-    P.data[@inbounds rowcol_to_vec(P, max(row, col), min(row, col))] = X
+Base.@propagate_inbounds function Base.setindex!(P::PackedMatrix{R,V,:US}, X, row, col) where {R,V}
+    if row < col
+        P.data[@inbounds rowcol_to_vec(P, row, col)] = sqrt(R(2)) * X
+    elseif row == col
+        P.data[@inbounds rowcol_to_vec(P, row, col)] = X
+    else
+        P.data[@inbounds rowcol_to_vec(P, col, row)] = sqrt(R(2)) * X
+    end
+    return X
+end
+Base.@propagate_inbounds function Base.setindex!(P::PackedMatrix{R,V,:L}, X, row, col) where {R,V}
+    if row ≥ col
+        P.data[@inbounds rowcol_to_vec(P, row, col)] = X
+    else
+        P.data[@inbounds rowcol_to_vec(P, col, row)] = conj(X)
+    end
+    return X
+end
 Base.@propagate_inbounds function Base.setindex!(P::PackedMatrix{R,V,:LS}, X, row, col) where {R,V}
-    Xsc = row == col ? X : sqrt(R(2)) * X
-    P.data[@inbounds rowcol_to_vec(P, max(row, col), min(row, col))] = Xsc
+    if row > col
+        P.data[@inbounds rowcol_to_vec(P, row, col)] = sqrt(R(2)) * X
+    elseif row == col
+        P.data[@inbounds rowcol_to_vec(P, row, col)] = X
+    else
+        P.data[@inbounds rowcol_to_vec(P, col, row)] = sqrt(R(2)) * X
+    end
     return X
 end
 Base.IndexStyle(::PackedMatrix) = IndexLinear()
@@ -194,7 +228,8 @@ Base.copy(P::PackedMatrix) = PackedMatrix(P.dim, copy(P.data), packed_format(P))
 for cp in (:copy!, :copyto!)
     for Fmt in (:(:U), :(:L), :(:US), :(:LS)) # we need to be so specific, as there would be ambiguities with the copyto!s below
         @eval begin
-            Base.@propagate_inbounds function Base.$cp(dst::PackedMatrix{R1,V1,$Fmt}, src::PackedMatrix{R2,V2,$Fmt}) where {R1,V1,R2,V2}
+            Base.@propagate_inbounds function Base.$cp(dst::PackedMatrix{R,V,$Fmt} where {R,V},
+                                                       src::PackedMatrix{R,V,$Fmt} where {R,V})
                 $cp(dst.data, src.data)
                 return dst
             end
@@ -261,37 +296,38 @@ Base.unsafe_convert(T::Type{Ptr{R}}, P::PackedMatrix{R}) where {R} = Base.unsafe
 Base.reshape(P::PackedMatrix, ::Val{1}) = P.data # controversial? But it allows taking views with linear indices appropriately.
 
 """
-    Matrix{R}(::PackedMatrix{R}) where {R}
+    Matrix{R}(::PackedMatrix{R}, viewtype=R isa Complex ? Hermitian : Symmetric) where {R}
 
-Construct a dense matrix from a packed matrix.
+Construct a dense matrix from a packed matrix. The parameter `symmetric` determines which kind of view is returned.
 """
-function Base.Matrix{R}(P::PackedMatrixUnscaled{R}) where {R}
+function Base.Matrix{R}(P::PackedMatrixUnscaled{R}, viewtype=R isa Complex ? Hermitian : Symmetric) where {R}
     result = Matrix{R}(undef, P.dim, P.dim)
     tpttr!(packed_ulchar(P), P.data, result)
-    return Symmetric(result, packed_isupper(P) ? :U : :L)
+    return viewtype(result, packed_isupper(P) ? :U : :L)
 end
-function Base.Matrix{R}(P::PackedMatrix{R,V,:US}) where {R,V}
+function Base.Matrix{R}(P::PackedMatrix{R,V,:US}, viewtype=R isa Complex ? Hermitian : Symmetric) where {R,V}
     result = Matrix{R}(undef, P.dim, P.dim)
     tpttr!('U', P.data, result)
     for j in 2:P.dim
         @inbounds rmul!(@view(result[1:j-1, j]), sqrt(inv(R(2))))
     end
-    return Symmetric(result, :U)
+    return viewtype(result, :U)
 end
-function Base.Matrix{R}(P::PackedMatrix{R,V,:LS}) where {R,V}
+function Base.Matrix{R}(P::PackedMatrix{R,V,:LS}, viewtype=R isa Complex ? Hermitian : Symmetric) where {R,V}
     result = Matrix{R}(undef, P.dim, P.dim)
     tpttr!('L', P.data, result)
     for j in 1:P.dim-1
         @inbounds rmul!(@view(result[j+1:end, j]), sqrt(inv(R(2))))
     end
-    return Symmetric(result, :L)
+    return viewtype(result, :L)
 end
 """
-    PackedMatrix(::Symmetric)
+    PackedMatrix(::Union{<:Hermitian,<:Symmetric})
 
-Construct a packed matrix from a symmetric wrapper of any other matrix.
+Construct a packed matrix from a Hermitian or symmetric wrapper of any other matrix. Note that in case a symmetric wrapper is
+used, the element type must be invariant under conjugation (but this is not checked)!
 """
-function PackedMatrix(A::Symmetric{R,<:AbstractMatrix{R}}) where {R}
+function PackedMatrix(A::LinearAlgebra.HermOrSym{R,<:AbstractMatrix{R}}) where {R}
     result = PackedMatrix{R}(undef, size(A, 1), A.uplo == 'U' ? :U : :L)
     trttp!(A.uplo, parent(A), result.data)
     return result

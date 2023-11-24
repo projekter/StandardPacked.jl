@@ -1,6 +1,7 @@
 export eigmin!, eigmax!
 
 LinearAlgebra.checksquare(P::PackedMatrix) = P.dim
+LinearAlgebra.chkstride1(P::PackedMatrix) = LinearAlgebra.chkstride1(P.data)
 
 LinearAlgebra.diagind(P::PackedMatrix, k::Integer=0) = collect(PackedDiagonalIterator(P, k))
 
