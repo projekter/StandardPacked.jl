@@ -49,16 +49,43 @@ lmul_offdiags!
 ```
 
 ## Extensions in LinearAlgebra
+This section documents functions for which the interface provided by `LinearAlgebra` has been extended to cover the
+`PackedMatrix` type. However, since `PackedMatrix` is an `AbstractMatrix`, many more helper and convenience functions are
+actually available that will (hopefully) fall back to the efficient implementations documented here.
 ```@docs
-axpy!
-mul!
-spr!(::Any, ::AbstractVector, ::PackedMatrix)
 dot
-eigen!
+axpy!
+axpby!
+factorize
+cholesky
+cholesky!
+bunchkaufman
+bunchkaufman!
 eigvals
 eigvals!
-eigmin!
+eigmax
 eigmax!
-cholesky!
+eigmin
+eigmin!
+eigvecs
+eigvecs!
+eigen
+eigen!
+diagind
+diag
+norm
+tr
 isposdef
+isposdef!
+transpose
+adjoint
+checksquare
+```
+
+### Low-level matrix operations
+```@docs
+mul!
+lmul!
+rmul!
+ldiv!
 ```
