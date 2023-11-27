@@ -15,6 +15,7 @@ chkpacked(n::Integer, fullsize::Integer) = 2fullsize == n * (n +1) || error("Pac
 @doc raw"""
     packedside(fullsize::Integer)
     packedside(AP::AbstractVector)
+    packedside(P::PackedMatrix)
 
 Calculates the side dimension of a vector `AP` of size `fullside` representing a symmetric packed matrix,
 ``\frac{\sqrt{8\mathit{fullsize} -1}}{2}``.
@@ -96,7 +97,7 @@ Base.length(iter::PackedDiagonalIterator) = iter.dim - iter.k
 """
     rmul_diags!(P::PackedMatrix{R}, factor::R) where {R}
 
-Right-multiplies all diagonal entries in `P` by `factor`.
+Right-multiplies all diagonal entries in `P` by `factor`. Returns `P`.
 
 See also [`lmul_diags!`](@ref), [`rmul_offdiags!`](@ref), [`lmul_offdiags!`](@ref).
 """
@@ -110,7 +111,7 @@ end
 """
     rmul_offdiags!(P::PackedMatrix{R}, factor::R) where {R}
 
-Right-multiplies all off-diagonal entries in `P` by `factor`.
+Right-multiplies all off-diagonal entries in `P` by `factor`. Returns `P`.
 
 See also [`rmul_diags!`](@ref), [`lmul_diags!`](@ref), [`lmul_offdiags!`](@ref).
 """
@@ -125,7 +126,7 @@ end
 """
     lmul_diags!(P::PackedMatrix{R}, factor::R) where {R}
 
-Left-multiplies all diagonal entries in `P` by `factor`.
+Left-multiplies all diagonal entries in `P` by `factor`. Returns `P`.
 
 See also [`rmul_diags!`](@ref), [`rmul_offdiags!`](@ref), [`lmul_offdiags!`](@ref).
 """
@@ -139,7 +140,7 @@ end
 """
     lmul_offdiags!(P::PackedMatrix{R}, factor::R) where {R}
 
-Left-multiplies all diagonal entries in `P` by `factor`.
+Left-multiplies all diagonal entries in `P` by `factor`. Returns `P`.
 
 See also [`rmul_diags!`](@ref), [`rmul_offdiags!`](@ref), [`lmul_diags!`](@ref).
 """

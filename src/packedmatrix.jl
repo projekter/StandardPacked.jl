@@ -5,7 +5,12 @@ export PackedMatrix, PackedMatrixUpper, PackedMatrixLower, PackedMatrixUnscaled,
     PackedMatrix{R,V,Fmt}
 
 Two-dimensional dense Hermitian square matrix in packed storage. Depending on Fmt, we only store the upper or lower triangle
-in col-major vectorized or scaled vectorized form.
+in col-major vectorized or scaled vectorized form:
+- `:U`: `PM[i, j] = PM[i + (j -1) * j ÷ 2]` for `1 ≤ i ≤ j ≤ n`
+- `:L`: `PM[i, j] = PM[i + (j -1) * (2n - j) ÷ 2]` for `1 ≤ j ≤ i ≤ n`
+- `:US`: `PM[i, j] = s(i, j) PM[i + (j -1) * j ÷ 2]` for `1 ≤ i ≤ j ≤ n`
+- `:LS`: `PM[i, j] = s(i, j) PM[i + (j -1) * (2n - j) ÷ 2]` for `1 ≤ j ≤ i ≤ n`
+where `n` is the side dimension of the packed matrix `PM`, `s(i, i) = 1`, and `s(i, j) = inv(sqrt(2))` for `i ≠ j`.
 
 !!! warning
     The PackedMatrix can be effciently broadcast to other matrices, which works on the vector representation. It can also
@@ -243,7 +248,11 @@ for cp in (:copy!, :copyto!)
         Base.@propagate_inbounds Base.$cp(dst::AbstractVector{R}, src::PackedMatrix{R}) where {R} = $cp(dst, src.data)
     end
 end
-function Base.copyto!(dst::PackedMatrix{R,V,:U}, src::AbstractMatrix{R}) where {R,V}
+@inline function Base.copyto!(dst::PackedMatrix{R,V,:U}, src::AbstractMatrix{R}) where {R,V}
+    # Usually, copyto! only requires dst to be large enough to hold src, but this would become tricky in the case of packed
+    # matrices. We could simply add the remaining offset to the bottom at the end in order to always copy the upper left
+    # part... But what happens if the src matrix would then break the symmetry?
+    @boundscheck checksquare(src) == dst.dim || throw(DimensionMismatch("Matrices must have the same size"))
     j = 1
     for (i, col) in enumerate(eachcol(src))
         @inbounds copyto!(dst.data, j, col, 1, i)
@@ -251,7 +260,8 @@ function Base.copyto!(dst::PackedMatrix{R,V,:U}, src::AbstractMatrix{R}) where {
     end
     return dst
 end
-function Base.copyto!(dst::PackedMatrix{R,V,:US}, src::AbstractMatrix{R}) where {R,V}
+@inline function Base.copyto!(dst::PackedMatrix{R,V,:US}, src::AbstractMatrix{R}) where {R,V}
+    @boundscheck checksquare(src) == dst.dim || throw(DimensionMismatch("Matrices must have the same size"))
     j = 1
     @inbounds for (i, col) in enumerate(eachcol(src))
         @views dst.data[j:j+i-2] .= sqrt(R(2)) .* col[1:i-1]
@@ -260,18 +270,20 @@ function Base.copyto!(dst::PackedMatrix{R,V,:US}, src::AbstractMatrix{R}) where 
     end
     return dst
 end
-function Base.copyto!(dst::PackedMatrix{R,V,:L}, src::AbstractMatrix{R}) where {R,V}
+@inline function Base.copyto!(dst::PackedMatrix{R,V,:L}, src::AbstractMatrix{R}) where {R,V}
+    @boundscheck checksquare(src) == dst.dim || throw(DimensionMismatch("Matrices must have the same size"))
     j = 1
-    l = src.dim
+    l = dst.dim
     for (i, col) in enumerate(eachcol(src))
         @inbounds copyto!(dst.data, j, col, i, l)
         j += l
         l -= 1
     end
 end
-function Base.copyto!(dst::PackedMatrix{R,V,:LS}, src::AbstractMatrix{R}) where {R,V}
+@inline function Base.copyto!(dst::PackedMatrix{R,V,:LS}, src::AbstractMatrix{R}) where {R,V}
+    @boundscheck checksquare(src) == dst.dim || throw(DimensionMismatch("Matrices must have the same size"))
     j = 1
-    l = src.dim
+    l = dst.dim
     @inbounds for (i, col) in enumerate(eachcol(src))
         dst.data[j] = col[i]
         @views dst.data[j+1:j+l-1] .= sqrt(R(2)) .* col[i+1:i+l-1]
@@ -279,7 +291,7 @@ function Base.copyto!(dst::PackedMatrix{R,V,:LS}, src::AbstractMatrix{R}) where 
         l -= 1
     end
 end
-function Base.copy!(dst::PackedMatrix{R}, src::AbstractMatrix{R}) where {R}
+@inline function Base.copy!(dst::PackedMatrix{R}, src::AbstractMatrix{R}) where {R}
     @boundscheck checkbounds(src, axes(dst)...)
     return copyto!(dst, src)
 end
@@ -294,6 +306,12 @@ end
 Base.convert(T::Type{<:Ptr}, P::PackedMatrix) = convert(T, P.data)
 Base.unsafe_convert(T::Type{Ptr{R}}, P::PackedMatrix{R}) where {R} = Base.unsafe_convert(T, P.data)
 Base.reshape(P::PackedMatrix, ::Val{1}) = P.data # controversial? But it allows taking views with linear indices appropriately.
+"""
+    vec(P::PackedMatrix)
+
+Returns the vectorized data associated with `P`. Note that this returns the actual vector, not a copy.
+"""
+LinearAlgebra.vec(P::PackedMatrix) = P.data
 
 """
     Matrix{R}(::PackedMatrix{R}, viewtype=R isa Complex ? Hermitian : Symmetric) where {R}
