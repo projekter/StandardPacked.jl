@@ -102,6 +102,20 @@ macro doubledoc(name, arg)
     end)
 end
 
+macro blascall(fn)
+    @assert(fn.head === :call)
+    blasname = macroexpand(__module__, :(@blasfunc($(fn.args[1]))))
+    esc(:(@ccall(libblastrampoline.$(blasname.value)($(fn.args[2:end]...))::Cvoid)))
+end
+
+const warnunscale = """
+
+!!! warning "Scaled matrices"
+    The variant of this function that takes a [`PackedMatrix`](@ref) also allows for scaled packed matrices. It will
+    automatically call [`packed_unscale!`](@ref) on the matrix and return the unscaled result. Do not use the reference to the
+    scaled matrix any more, only the result of this function!
+"""
+
 spmv!(α::Real, AP::PackedMatrixUnscaled, args...) = spmv!(packed_ulchar(AP), α, vec(AP), args...)
 @doc replace(@doc(spmv!).meta[:results][1].text[1],
     "    spmv!(uplo, α, AP, x, β, y)" => "    spmv!(uplo, α, AP::AbstractVector, x, β, y)
@@ -112,16 +126,20 @@ hpmv!(α::Number, AP::PackedMatrixUnscaled, args...) = hpmv!(packed_ulchar(AP), 
     "    hpmv!(uplo, α, AP, x, β, y)" => "    hpmv!(uplo, α, AP::AbstractVector, x, β, y)
     hpmv!(α, AP::PackedMatrixUnscaled, x, β, y)") hpmv!
 
-spr!(α::Real, x::AbstractArray{T}, AP::PackedMatrixUnscaled{T}) where {T<:BlasReal} = spr!(packed_ulchar(AP), α, x, vec(AP))
-@doc replace(@doc(spr!).meta[:results][1].text[1],
+function spr!(α::Real, x::AbstractArray{T}, AP::PackedMatrix{T}) where {T<:BlasReal}
+    AP = packed_unscale!(AP)
+    spr!(packed_ulchar(AP), α, x, vec(AP))
+    return AP
+end
+@doc (replace(@doc(spr!).meta[:results][1].text[1],
     "    spr!(uplo, α, x, AP)" => "    spr!(uplo, α, x, AP::AbstractVector)
-    spr!(α, x, AP::PackedMatrixUnscaled)") spr!
+    spr!(α, x, AP::PackedMatrix)") * warnunscale) spr!
 
-for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv,    hpsv,    sptrf,    hptrf,    sptrs,    hptrs,    sptri,    hptri,   spev,   spevx,   spevd,   spgv,   spgvx,   spgvd,   hptrd,    opgtr,   opmtr,  elty) in
-   ((nothing, :sgemmt_, :strttp_, :stpttr_, :spptrf_, :spptrs_, :spptri_, :sspsv_, nothing, :ssptrf_, nothing,  :ssptrs_, nothing,  :ssptri_, nothing,  :spev_, :spevx_, :spevd_, :spgv_, :spgvx_, :spgvd_, :sptrd_, :soptr_, :sopmtr_, Float32),
-    (nothing, :dgemmt_, :dtrttp_, :dtpttr_, :dpptrf_, :dpptrs_, :dpptri_, :sspsv_, nothing, :dsptrf_, nothing,  :dsptrs_, nothing,  :dsptri_, nothing,  :dpev_, :dpevx_, :dpevd_, :dpgv_, :dpgvx_, :dpgvd_, :dptrd_, :doptr_, :dopmtr_, Float64),
-    (:chpr_,  :cgemmt_, :ctrttp_, :ctpttr_, :cpptrf_, :cpptrs_, :cpptri_, :cspsv_, :chpsv_, :csptrf_, :chptrf_, :csptrs_, :chptrs_, :csptri_, :chptri_, :cpev_, :cpevx_, :cpevd_, :cpgv_, :cpgvx_, :cpgvd_, :cptrd_, :coptr_, :copmtr_, ComplexF32),
-    (:zhpr_,  :zgemmt_, :ztrttp_, :ztpttr_, :zpptrf_, :zpptrs_, :zpptri_, :zspsv_, :zhpsv_, :zsptrf_, :zhptrf_, :zsptrs_, :zhptrs_, :zsptri_, :zhptri_, :zpev_, :zpevx_, :zpevd_, :zpgv_, :zpgvx_, :zpgvd_, :zptrd_, :zoptr_, :zopmtr_, ComplexF64))
+for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv,    hpsv,    sptrf,    hptrf,    sptrs,    hptrs,    sptri,    hptri,    spev,    spevx,    spevd,    spgv,    spgvx,    spgvd,    hptrd,    opgtr,    opmtr,  elty) in
+   ((nothing, :sgemmt_, :strttp_, :stpttr_, :spptrf_, :spptrs_, :spptri_, :sspsv_, nothing, :ssptrf_, nothing,  :ssptrs_, nothing,  :ssptri_, nothing,  :sspev_, :sspevx_, :sspevd_, :sspgv_, :sspgvx_, :sspgvd_, :ssptrd_, :sopgtr_, :sopmtr_, Float32),
+    (nothing, :dgemmt_, :dtrttp_, :dtpttr_, :dpptrf_, :dpptrs_, :dpptri_, :sspsv_, nothing, :dsptrf_, nothing,  :dsptrs_, nothing,  :dsptri_, nothing,  :dspev_, :dspevx_, :dspevd_, :dspgv_, :dspgvx_, :dspgvd_, :dsptrd_, :dopgtr_, :dopmtr_, Float64),
+    (:chpr_,  :cgemmt_, :ctrttp_, :ctpttr_, :cpptrf_, :cpptrs_, :cpptri_, :cspsv_, :chpsv_, :csptrf_, :chptrf_, :csptrs_, :chptrs_, :csptri_, :chptri_, :chpev_, :chpevx_, :chpevd_, :chpgv_, :chpgvx_, :chpgvd_, :chptrd_, :cupgtr_, :cupmtr_, ComplexF32),
+    (:zhpr_,  :zgemmt_, :ztrttp_, :ztpttr_, :zpptrf_, :zpptrs_, :zpptri_, :zspsv_, :zhpsv_, :zsptrf_, :zhptrf_, :zsptrs_, :zhptrs_, :zsptri_, :zhptri_, :zhpev_, :zhpevx_, :zhpevd_, :zhpgv_, :zhpgvx_, :zhpgvd_, :zhptrd_, :zupgtr_, :zupmtr_, ComplexF64))
     isnothing(hpr) || @eval begin
         # SUBROUTINE ZHPR(UPLO,N,ALPHA,X,INCX,AP)
         # *       .. Scalar Arguments ..
@@ -133,9 +151,9 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
         # *       COMPLEX*16 AP(*),X(*)
         function hpr!(uplo::AbstractChar, n::Integer, α::$elty, x::PtrOrVec{$elty}, incx::Integer, AP::PtrOrVec{$elty})
             chkuplo(uplo)
-            @ccall libblastrampoline.$(@blasfunc(hpr))(
+            @blascall $hpr(
                 uplo::Ref{UInt8}, n::Ref{BlasInt}, α::Ref{$elty}, x::Ptr{$elty}, incx::Ref{BlasInt}, AP::Ptr{$elty}, 1::Clong
-            )::Cvoid
+            )
             return AP
         end
     end
@@ -173,11 +191,11 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
                     throw(DimensionMismatch(lazy"A has size ($m,$ka), B has size ($kb,$n), C has size $(size(C))"))
                 end
                 chkstride1(A, B, C)
-                @ccall libblastrampoline.$(@blasfunc(gemmt))(
+                @blascall $gemmt(
                     uplo::Ref{UInt8}, transA::Ref{UInt8}, transB::Ref{UInt8}, alpha::Ref{$elty}, A::Ptr{$elty},
                     max(1, stride(A, 2))::Ref{BlasInt}, B::Ptr{$elty}, max(1, stride(B, 2))::Ref{BlasInt}, beta::Ref{$elty},
                     C::Ptr{$elty}, max(1, stride(C, 2))::Ref{BlasInt}, 1::Clong, 1::Clong, 1::Clong
-                )::Cvoid
+                )
                 return C
             end
         end
@@ -193,9 +211,9 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
         function trttp!(uplo::AbstractChar, n::Integer, A::PtrOrMat{$elty}, lda::Integer, AP::PtrOrVec{$elty})
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(trttp))(
+            @blascall $trttp(
                 uplo::Ref{UInt8}, n::Ref{BlasInt}, A::Ptr{$elty}, lda::Ref{BlasInt}, AP::Ptr{$elty}, info::Ref{BlasInt}
-            )::Cvoid
+            )
             chklapackerror(info[])
             return AP
         end
@@ -210,10 +228,10 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
         function tpttr!(uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty}, A::PtrOrMat{$elty}, lda::Integer)
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(tpttr))(
+            @blascall $tpttr(
                 uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, A::Ptr{$elty}, lda::Ref{BlasInt}, info::Ref{BlasInt},
                 1::Clong
-            )::Cvoid
+            )
             chklapackerror(info[])
             return A
         end
@@ -228,9 +246,9 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
         function pptrf!(uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty})
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(pptrf))(
+            @blascall $pptrf(
                 uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, info::Ref{BlasInt}, 1::Clong
-            )::Cvoid
+            )
             chkargsok(info[])
             #info[] > 0 means the leading minor of order info[] is not positive definite
             #ordinarily, throw Exception here, but return error code here
@@ -249,10 +267,10 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
             ldb::Integer)
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(pptrs))(
+            @blascall $pptrs(
                 uplo::Ref{UInt8}, n::Ref{BlasInt}, nrhs::Ref{BlasInt}, AP::Ptr{$elty}, B::Ptr{$elty}, ldb::Ref{BlasInt},
                 info::Ref{BlasInt}, 1::Clong
-            )::Cvoid
+            )
             chklapackerror(info[])
             return B
         end
@@ -267,9 +285,9 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
         function pptri!(uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty})
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(pptri))(
+            @blascall $pptri(
                 uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, info::Ref{BlasInt}, 1::Clong
-            )::Cvoid
+            )
             chkargsok(info[])
             checknonsingular(info[])
             return AP
@@ -288,10 +306,10 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
             B::PtrOrMat{$elty}, ldb::Integer)
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$blasf(
+            @blascall $blasf(
                 uplo::Ref{UInt8}, n::Ref{BlasInt}, nrhs::Ref{BlasInt}, AP::Ptr{$elty}, ipiv::Ptr{BlasInt}, B::Ptr{$elty},
                 ldb::Ref{BlasInt}, info::Ref{BlasInt}, 1::Clong
-            )::Cvoid
+            )
             chklapackerror(info[])
             return B, AP, ipiv
         end
@@ -308,9 +326,9 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
         function $f(uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty}, ipiv::PtrOrVec{BlasInt})
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$blasf(
+            @blascall $blasf(
                 uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, ipiv::Ptr{BlasInt}, info::Ref{BlasInt}, 1::Clong
-            )::Cvoid
+            )
             chkargsok(info[])
             return AP, ipiv, info[]
         end
@@ -328,10 +346,10 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
             B::PtrOrMat{$elty}, ldb::Integer)
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$blasf(
+            @blascall $blasf(
                 uplo::Ref{UInt8}, n::Ref{BlasInt}, nrhs::Ref{BlasInt}, AP::Ptr{$elty}, ipiv::Ptr{BlasInt}, B::Ptr{$elty},
                 ldb::Ref{BlasInt}, info::Ref{BlasInt}, 1::Clong
-            )::Cvoid
+            )
             chklapackerror(info[])
             return B
         end
@@ -348,10 +366,10 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
         function $f(uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty}, ipiv::PtrOrVec{BlasInt}, work::PtrOrVec{$elty})
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$blasf(
+            @blascall $blasf(
                 uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, ipiv::Ptr{BlasInt}, work::Ptr{$elty}, info::Ref{BlasInt},
                 1::Clong
-            )::Cvoid
+            )
             chklapackerror(info[])
             return AP
         end
@@ -368,10 +386,10 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
             Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty})
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(spev))(
+            @blascall $spev(
                 jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, W::Ptr{$elty}, Z::Ptr{$elty},
                 ldz::Ref{BlasInt}, work::Ptr{$elty}, info::Ref{BlasInt}, 1::Clong, 1::Clong
-            )::Cvoid
+            )
             chklapackerror(info[])
             return W, Z
         end
@@ -387,11 +405,12 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
         #          DOUBLE PRECISION   AP( * ), W( * ), WORK( * ), Z( LDZ, * )
         function spevx!(jobz::AbstractChar, range::AbstractChar, uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty},
                 vl::Union{Nothing,$elty}, vu::Union{Nothing,$elty}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer},
-                abstol::$elty, m::Integer, W::PtrOrVec{$elty}, Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty},
+                abstol::$elty, W::PtrOrVec{$elty}, Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty},
                 iwork::PtrOrVec{BlasInt}, ifail::PtrOrVec{BlasInt})
             chkuplo(uplo)
+            m = Ref{BlasInt}()
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(spevx))(
+            @blascall $spevx(
                 jobz::Ref{UInt8}, range::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty},
                 (isnothing(vl) ? C_NULL : Ref(vl))::Ptr{$elty},
                 (isnothing(vu) ? C_NULL : Ref(vu))::Ptr{$elty},
@@ -399,9 +418,9 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
                 (isnothing(iu) ? C_NULL : Ref(BlasInt(iu)))::Ptr{BlasInt},
                 abstol::Ref{$elty}, m::Ref{BlasInt}, W::Ptr{$elty}, Z::Ptr{$elty}, ldz::Ref{BlasInt}, work::Ptr{$elty},
                 iwork::Ptr{BlasInt}, ifail::Ptr{BlasInt}, info::Ref{BlasInt}, 1::Clong, 1::Clong, 1::Clong
-            )::Cvoid
+            )
             chkargsok(info[])
-            return W, Z, info[], ifail
+            return m[], W, Z, info[], ifail
         end
 
         # SUBROUTINE DSPEVD( JOBZ, UPLO, N, AP, W, Z, LDZ, WORK, LWORK, IWORK, LIWORK, INFO )
@@ -416,11 +435,11 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
             Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty}, lwork::Integer, iwork::PtrOrVec{BlasInt}, liwork::Integer)
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(spevd))(
+            @blascall $spevd(
                 jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, W::Ptr{$elty}, Z::Ptr{$elty},
                 ldz::Ref{BlasInt}, work::Ptr{$elty}, lwork::Ref{BlasInt}, iwork::Ptr{BlasInt}, liwork::Ref{BlasInt},
                 info::Ref{BlasInt}, 1::Clong, 1::Clong
-            )::Cvoid
+            )
             chklapackerror(info[])
             return W, Z
         end
@@ -436,10 +455,10 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
             BP::PtrOrVec{$elty}, W::PtrOrVec{$elty}, Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty})
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(spgv))(
+            @blascall $spgv(
                 itype::Ref{BlasInt}, jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, BP::Ptr{$elty},
                 W::Ptr{$elty}, Z::Ptr{$elty}, ldz::Ref{BlasInt}, work::Ptr{$elty}, info::Ref{BlasInt}, 1::Clong, 1::Clong
-            )::Cvoid
+            )
             chklapackerror(info[])
             return W, Z
         end
@@ -456,11 +475,12 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
         #          DOUBLE PRECISION   AP( * ), BP( * ), W( * ), WORK( * ), Z( LDZ, * )
         function spgvx!(itype::Integer, jobz::AbstractChar, range::AbstractChar, uplo::AbstractChar, n::Integer,
             AP::PtrOrVec{$elty}, BP::PtrOrVec{$elty}, vl::Union{Nothing,$elty}, vu::Union{Nothing,$elty},
-            il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::$elty, m::Integer, W::PtrOrVec{$elty},
-            Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty}, iwork::PtrOrVec{BlasInt}, ifail::PtrOrVec{BlasInt})
+            il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::$elty, W::PtrOrVec{$elty}, Z::PtrOrMat{$elty},
+            ldz::Integer, work::PtrOrVec{$elty}, iwork::PtrOrVec{BlasInt}, ifail::PtrOrVec{BlasInt})
             chkuplo(uplo)
+            m = Ref{BlasInt}()
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(spgvx))(
+            @blascall $spgvx(
                 itype::Ref{BlasInt}, jobz::Ref{UInt8}, range::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty},
                 BP::Ptr{$elty}, (isnothing(vl) ? C_NULL : Ref(vl))::Ptr{$elty},
                 (isnothing(vu) ? C_NULL : Ref(vu))::Ptr{$elty},
@@ -468,9 +488,9 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
                 (isnothing(iu) ? C_NULL : Ref(BlasInt(iu)))::Ptr{BlasInt},
                 abstol::Ref{$elty}, m::Ref{BlasInt}, W::Ptr{$elty}, Z::Ptr{$elty}, ldz::Ref{BlasInt}, work::Ptr{$elty},
                 iwork::Ptr{BlasInt}, ifail::Ptr{BlasInt}, info::Ref{BlasInt}, 1::Clong, 1::Clong, 1::Clong
-            )::Cvoid
+            )
             chkargsok(info[])
-            return W, Z, info[], ifail
+            return m[], W, Z, info[], ifail
         end
 
         # SUBROUTINE DSPGVD( ITYPE, JOBZ, UPLO, N, AP, BP, W, Z, LDZ, WORK, LWORK, IWORK, LIWORK, INFO )
@@ -486,11 +506,11 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
             iwork::PtrOrVec{BlasInt}, liwork::Integer)
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(spgvd))(
+            @blascall $spgvd(
                 itype::Ref{BlasInt}, jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, BP::Ptr{$elty},
                 W::Ptr{$elty}, Z::Ptr{$elty}, ldz::Ref{BlasInt}, work::Ptr{$elty}, lwork::Ref{BlasInt}, iwork::Ptr{BlasInt},
                 liwork::Ref{BlasInt}, info::Ref{BlasInt}, 1::Clong, 1::Clong
-            )::Cvoid
+            )
             chklapackerror(info[])
             return W, Z
         end
@@ -508,10 +528,10 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
             Z::PtrOrVec{$elty}, ldz::Integer, work::PtrOrVec{$elty}, rwork::PtrOrVec{$(_realtype(elty))})
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(spev))(
+            @blascall $spev(
                 jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, W::Ptr{$elty}, Z::Ptr{$elty},
                 ldz::Ref{BlasInt}, work::Ptr{$elty}, rwork::Ptr{$(_realtype(elty))}, info::Ref{BlasInt}, 1::Clong, 1::Clong
-            )::Cvoid
+            )
             chklapackerror(info[])
             return W, Z
         end
@@ -528,12 +548,13 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
         #          COMPLEX*16         AP( * ), WORK( * ), Z( LDZ, * )
         function spevx!(jobz::AbstractChar, range::AbstractChar, uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty},
             vl::Union{Nothing,$(_realtype(elty))}, vu::Union{Nothing,$(_realtype(elty))}, il::Union{Nothing,<:Integer},
-            iu::Union{Nothing,<:Integer}, abstol::$(_realtype(elty)), m::Integer, W::PtrOrVec{$(_realtype(elty))},
+            iu::Union{Nothing,<:Integer}, abstol::$(_realtype(elty)), W::PtrOrVec{$(_realtype(elty))},
             Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty}, rwork::PtrOrVec{$(_realtype(elty))},
             iwork::PtrOrVec{BlasInt}, ifail::PtrOrVec{BlasInt})
             chkuplo(uplo)
+            m = Ref{BlasInt}()
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(spevx))(
+            @blascall $spevx(
                 jobz::Ref{UInt8}, range::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty},
                 (isnothing(vl) ? C_NULL : Ref(vl))::Ptr{$(_realtype(elty))},
                 (isnothing(vu) ? C_NULL : Ref(vu))::Ptr{$(_realtype(elty))},
@@ -542,9 +563,9 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
                 abstol::Ref{$elty}, m::Ref{BlasInt}, W::Ptr{$(_realtype(elty))}, Z::Ptr{$elty}, ldz::Ref{BlasInt},
                 work::Ptr{$elty}, rwork::Ptr{$(_realtype(elty))}, iwork::Ptr{BlasInt}, ifail::Ptr{BlasInt},
                 info::Ref{BlasInt}, 1::Clong, 1::Clong, 1::Clong
-            )::Cvoid
+            )
             chkargsok(info[])
-            return W, Z, info[], ifail
+            return m[], W, Z, info[], ifail
         end
 
         # SUBROUTINE ZHPEVD( JOBZ, UPLO, N, AP, W, Z, LDZ, WORK, LWORK, RWORK, LRWORK, IWORK, LIWORK, INFO )
@@ -561,11 +582,11 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
             rwork::PtrOrVec{$(_realtype(elty))}, lrwork::Integer, iwork::PtrOrVec{BlasInt}, liwork::Integer)
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(spevd))(
+            @blascall $spevd(
                 jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, W::Ptr{$(_realtype(elty))}, Z::Ptr{$elty},
                 ldz::Ref{BlasInt}, work::Ptr{$elty}, lwork::Ref{BlasInt}, rwork::Ptr{$(_realtype(elty))}, lrwork::Ref{BlasInt},
                 iwork::Ptr{BlasInt}, liwork::Ref{BlasInt}, info::Ref{BlasInt}, 1::Clong, 1::Clong
-            )::Cvoid
+            )
             chklapackerror(info[])
             return W, Z
         end
@@ -583,11 +604,11 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
             rwork::PtrOrVec{$(_realtype(elty))})
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(spgv))(
+            @blascall $spgv(
                 itype::Ref{BlasInt}, jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, BP::Ptr{$elty},
                 W::Ptr{$elty}, Z::Ptr{$elty}, ldz::Ref{BlasInt}, work::Ptr{$elty}, rwork::Ptr{$(_realtype(elty))},
                 info::Ref{BlasInt}, 1::Clong, 1::Clong
-            )::Cvoid
+            )
             chklapackerror(info[])
             return W, Z
         end
@@ -605,13 +626,13 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
         #          COMPLEX*16         AP( * ), BP( * ), WORK( * ), Z( LDZ, * )
         function spgvx!(itype::Integer, jobz::AbstractChar, range::AbstractChar, uplo::AbstractChar, n::Integer,
             AP::PtrOrVec{$elty}, BP::PtrOrVec{$elty}, vl::Union{Nothing,$(_realtype(elty))},
-            vu::Union{Nothing,$(_realtype(elty))}, il::Union{Nothing,<:Integer},
-            iu::Union{Nothing,<:Integer}, abstol::$(_realtype(elty)), m::Integer, W::PtrOrVec{$(_realtype(elty))},
-            Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty}, rwork::PtrOrVec{$(_realtype(elty))},
-            iwork::PtrOrVec{BlasInt}, ifail::PtrOrVec{BlasInt})
+            vu::Union{Nothing,$(_realtype(elty))}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer},
+            abstol::$(_realtype(elty)), W::PtrOrVec{$(_realtype(elty))}, Z::PtrOrMat{$elty}, ldz::Integer,
+            work::PtrOrVec{$elty}, rwork::PtrOrVec{$(_realtype(elty))}, iwork::PtrOrVec{BlasInt}, ifail::PtrOrVec{BlasInt})
             chkuplo(uplo)
+            m = Ref{BlasInt}()
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(spgvx))(
+            @blascall $spgvx(
                 itype::Ref{BlasInt}, jobz::Ref{UInt8}, range::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty},
                 BP::Ptr{$elty}, (isnothing(vl) ? C_NULL : Ref(vl))::Ptr{$(_realtype(elty))},
                 (isnothing(vu) ? C_NULL : Ref(vu))::Ptr{$(_realtype(elty))},
@@ -620,9 +641,9 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
                 abstol::Ref{$elty}, m::Ref{BlasInt}, W::Ptr{$(_realtype(elty))}, Z::Ptr{$elty}, ldz::Ref{BlasInt},
                 work::Ptr{$elty}, rwork::Ptr{$(_realtype(elty))}, iwork::Ptr{BlasInt}, ifail::Ptr{BlasInt},
                 info::Ref{BlasInt}, 1::Clong, 1::Clong, 1::Clong
-            )::Cvoid
+            )
             chkargsok(info[])
-            return W, Z, info[], ifail
+            return m[], W, Z, info[], ifail
         end
 
         # SUBROUTINE ZHPGVD( ITYPE, JOBZ, UPLO, N, AP, BP, W, Z, LDZ, WORK, LWORK, RWORK, LRWORK, IWORK, LIWORK, INFO )
@@ -639,12 +660,12 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
             lwork::Integer, rwork::PtrOrVec{$(_realtype(elty))}, lrwork::Integer, iwork::PtrOrVec{BlasInt}, liwork::Integer)
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(spgvd))(
+            @blascall $spgvd(
                 itype::Ref{BlasInt}, jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, BP::Ptr{$elty},
                 W::Ptr{$(_realtype(elty))}, Z::Ptr{$elty}, ldz::Ref{BlasInt}, work::Ptr{$elty}, lwork::Ref{BlasInt},
                 rwork::Ptr{$(_realtype(elty))}, lrwork::Ref{BlasInt}, iwork::Ptr{BlasInt}, liwork::Ref{BlasInt},
                 info::Ref{BlasInt}, 1::Clong, 1::Clong
-            )::Cvoid
+            )
             chklapackerror(info[])
             return W, Z
         end
@@ -662,10 +683,10 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
             E::PtrOrVec{$(_realtype(elty))}, τ::PtrOrVec{$elty})
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(hptrd))(
+            @blascall $hptrd(
                 uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, D::Ptr{$(_realtype(elty))}, E::Ptr{$(_realtype(elty))},
                 τ::Ptr{$elty}, info::Ref{BlasInt}, 1::Clong
-            )::Cvoid
+            )
             chklapackerror(info)
             return AP, τ, D, E
         end
@@ -681,10 +702,10 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
             ldq::Integer, work::PtrOrVec{$elty})
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(opgtr))(
+            @blascall $opgtr(
                 uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, τ::Ptr{$elty}, Q::Ptr{$elty}, ldq::Ref{BlasInt},
                 work::Ptr{$elty}, info::Ref{BlasInt}, 1::Clong
-            )::Cvoid
+            )
             chklapackerror(info[])
             return Q
         end
@@ -700,33 +721,48 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
             AP::PtrOrVec{$elty}, τ::PtrOrVec{$elty}, C::PtrOrMat{$elty}, ldc::Integer, work::PtrOrVec{$elty})
             chkuplo(uplo)
             info = Ref{BlasInt}()
-            @ccall libblastrampoline.$(@blasfunc(opmtr))(
+            @blascall $opmtr(
                 side::Ref{UInt8}, uplo::Ref{UInt8}, trans::Ref{UInt8}, m::Ref{BlasInt}, n::Ref{BlasInt}, AP::Ptr{$elty},
                 τ::Ptr{$elty}, C::Ptr{$elty}, ldc::Ref{BlasInt}, work::Ptr{$elty}, info::Ref{BlasInt}, 1::Clong, 1::Clong,
                 1::Clong
-            )::Cvoid
+            )
             chklapackerror(info[])
             return C
         end
     end
 end
 
-macro pmalso(fun)
+macro pmalso(scaled, fun=nothing)
+    if isnothing(fun)
+        fun = scaled
+        scaled = :disallow
+    else
+        scaled = scaled.value
+    end
+    @assert(scaled ∈ (:disallow, :unscale, :diagscale, :ignore))
     # fun is a function definition that contains uplo and a PM-typed parameter. We rewrite this into two function definitions:
-    # - one where we just replace PM by AbstractVector
-    # - one where we remove the uplo parameter, replace all PM{T} by PM and add where {PM<:PackedMatrixUnscaled{T}} and
-    #   introduce the uplo variable
-    @assert(fun.head === :function)
+    # - one where we replace all PM{T} by PM and add where {PM<:AbstractVector{T}}
+    # - one where we remove the uplo parameter, and introduce the uplo variable
+    #   if scaled === :disallow: replace all PM{T} by PM and add where {PM<:PackedMatrixUnscaled{T}}
+    #   if scaled === :unscale: replace all PM{T} by PM and add where {PM<:PackedMatrix{T}}, add packed_unscale!
+    #   if scaled === :diagscale: same, but add PM <: PackedMatrixScaled && rmul_diags!(, scalefac) instead
+    #   if scaled === :ignore, just allow all packed matrices without anything to add
+    # In all functions, we also add the variables ...v for the vec() of the packed matrices (or the objects themselves).
+    @assert(fun.head === :function && fun.args[2].head === :block)
     fun2 = deepcopy(fun)
     fncall, fncall2 = fun.args[1], fun2.args[1]
-    fncall2parent = fun2
+    fncallparent, fncall2parent = fun, fun2
     while fncall.head === :where
+        fncallparent = fncall
         fncall = fncall.args[1]
         fncall2parent = fncall2
         fncall2 = fncall2.args[1]
     end
     @assert(fncall.head === :call)
     commontype = nothing # this will hold the name of our generic type, most likely :T
+    if scaled ∈ (:unscale, :diagscale)
+        unscalecalls = Any[]
+    end
     for i in length(fncall.args):-1:2
         arg = fncall.args[i]
         if arg.head === :(::)
@@ -735,27 +771,48 @@ macro pmalso(fun)
                 deleteat!(fncall2.args, i) # remove the uplo parameter from the second function definition
                 continue
             end
+            name = arg.args[1]
             type = arg.args[2]
             if type === :PM
-                arg.args[2] = :AbstractVector # in the first function definition, replace PM by AbstractVector
             elseif type isa Expr && type.head === :curly && type.args[1] === :PM
-                type.args[1] = :AbstractVector # in the first function definition, replace PM{T} by AbstractVector{T}
                 if isnothing(commontype)
-                    commontype = type.args[2] # capture the type argument for the second function definition
+                    commontype = type.args[2] # capture the type argument
                 else
                     @assert(type.args[2] === commontype)
                 end
-                fncall2.args[i].args[2] = :PM # in the second function definition, replace PM{T} by PM
+                arg.args[2] = :PM # replace PM{T} by PM
+                fncall2.args[i].args[2] = :PM
+            else
+                continue
+            end
+            pushfirst!(fun.args[2].args, :($(Symbol(name, "v")) = $name))
+            pushfirst!(fun2.args[2].args, :($(Symbol(name, "v")) = vec($name)))
+            if scaled === :unscale
+                push!(unscalecalls, :($name = packed_unscale!($name)))
+            elseif scaled === :diagscale
+                push!(unscalecalls, :(rmul_diags!($name, scalefac)))
             end
         elseif arg === :uplo # doesn't happen as upload is always qualified with AbstractChar, but anyway...
             deleteat!(fncall2.args, i)
         end
     end
     # in the second function definition, introduce a new where capture
-    fncall2parent.args[1] = Expr(:where, fncall2, isnothing(commontype) ? :(PM<:PackedMatrixUnscaled) :
-                                                                          :(PM<:PackedMatrixUnscaled{$commontype}))
+    supertype = scaled ∈ (:disallow, :ignore) ? :PackedMatrixUnscaled : :PackedMatrix
+    fncallparent.args[1] = Expr(:where, fncall, isnothing(commontype) ? :(PM<:AbstractVector) :
+                                                                        :(PM<:AbstractVector{$commontype}))
+    fncall2parent.args[1] = Expr(:where, fncall2, isnothing(commontype) ? :(PM<:$supertype) :
+                                                                          :(PM<:$supertype{$commontype}))
     # in the second function definition, make the variable uplo available
-    @assert(fun2.args[2].head === :block)
+    if scaled === :unscale
+        prepend!(fun2.args[2].args, unscalecalls)
+    elseif scaled === :diagscale
+        pushfirst!(fun2.args[2].args, :(
+            if PM <: PackedMatrixScaled
+                scalefac = sqrt($(isnothing(commontype) ? :2 : :(_realtype($commontype)(2))))
+                $(unscalecalls...)
+            end
+        ))
+    end
     pushfirst!(fun2.args[2].args, :(uplo = packed_ulchar(PM)))
     esc(quote
         $fun
@@ -763,21 +820,21 @@ macro pmalso(fun)
     end)
 end
 
-@pmalso function hpr!(uplo::AbstractChar, α::Real, x::AbstractVector{T}, AP::PM{T}) where {T<:BlasComplex}
-    require_one_based_indexing(AP, x)
+@pmalso :unscale function hpr!(uplo::AbstractChar, α::Real, x::AbstractVector{T}, AP::PM{T}) where {T<:BlasComplex}
+    require_one_based_indexing(APv, x)
     N = length(x)
-    2length(AP) ≥ N*(N + 1) ||
+    2length(APv) ≥ N*(N + 1) ||
         throw(DimensionMismatch(lazy"Packed symmetric matrix A has size smaller than length(x) = $(N)."))
-    chkstride1(AP)
+    chkstride1(APv)
     px, stx = vec_pointer_stride(x, ArgumentError("input vector with 0 stride is not allowed"))
-    return GC.@preserve x hpr!(uplo, N, T(α), px, stx, AP)
+    return GC.@preserve x hpr!(uplo, N, T(α), px, stx, APv)
 end
 
-@doc raw"""
+@doc """
     hpr!(uplo, α, x, AP::AbstractVector)
-    hpr!(α, x, AP::PackedMatrixUnscaled)
+    hpr!(α, x, AP::PackedMatrix)
 
-Update matrix ``A`` as ``A + \alpha x x'``, where ``A`` is a Hermitian matrix provided in packed format `AP` and `x` is a
+Update matrix ``A`` as ``A + \\alpha x x'``, where ``A`` is a Hermitian matrix provided in packed format `AP` and `x` is a
 vector.
 
 With `uplo = 'U'`, the vector `AP` must contain the upper triangular part of the Hermitian matrix packed sequentially, column
@@ -789,6 +846,7 @@ by column, so that `AP[1]` contains `A[1, 1]`, `AP[2]` and `AP[3]` contain `A[2,
 The scalar input `α` must be real.
 
 The array inputs `x` and `AP` must all be of `ComplexF32` or `ComplexF64` type. Return the updated `AP`.
+$warnunscale
 """
 hpr!
 
@@ -804,11 +862,11 @@ result matrix.
 """ gemmt!
 
 @pmalso function trttp!(uplo::AbstractChar, A::AbstractMatrix{T}, AP::PM{T}) where {T<:BlasFloat}
-    chkstride1(AP)
-    require_one_based_indexing(AP, A)
+    chkstride1(APv)
+    require_one_based_indexing(APv, A)
     n = checksquare(A)
     chkpacked(n, AP)
-    return trttp(uplo, n, A, max(1, stride(A, 2)), AP)
+    return trttp(uplo, n, A, max(1, stride(A, 2)), APv)
 end
 
 @pmalso function trttp!(uplo::AbstractChar, A::AbstractMatrix{T}, AP::PM{T}) where {T}
@@ -819,13 +877,13 @@ end
         k = 0
         @inbounds for j in 1:n, i in j:n
             k += 1
-            AP[k] = A[i, j]
+            APv[k] = A[i, j]
         end
     else
         k = 0
         @inbounds for j in 1:n, i in 1:j
             k += 1
-            AP[k] = A[i, j]
+            APv[k] = A[i, j]
         end
     end
     return AP
@@ -843,11 +901,11 @@ end
 trttp!
 
 @pmalso function tpttr!(uplo::AbstractChar, AP::PM{T}, A::AbstractMatrix{T}) where {T<:BlasFloat}
-    chkstride1(AP)
-    require_one_based_indexing(AP, A)
+    chkstride1(APv)
+    require_one_based_indexing(APv, A)
     n = checksquare(A)
     chkpacked(n, AP)
-    return tpttr(uplo, n, AP, A, max(1, stride(A, 2)))
+    return tpttr!(uplo, n, APv, A, max(1, stride(A, 2)))
 end
 
 @pmalso function tpttr!(uplo::AbstractChar, AP::PM{T}, A::AbstractMatrix{T}) where {T}
@@ -858,13 +916,13 @@ end
         k = 0
         @inbounds for j in 1:n, i in j:n
             k += 1
-            A[i, j] = AP[k]
+            A[i, j] = APv[k]
         end
     else
         k = 0
         @inbounds for j in 1:n, i in 1:j
             k += 1
-            A[i, j] = AP[k]
+            A[i, j] = APv[k]
         end
     end
     return A
@@ -881,15 +939,15 @@ end
 """
 tpttr!
 
-@pmalso function pptrf!(uplo::AbstractChar, AP::PM{<:BlasFloat})
-    require_one_based_indexing(AP)
-    chkstride1(AP)
-    return pptrf!(uplo, packedside(AP), n)
+@pmalso :unscale function pptrf!(uplo::AbstractChar, AP::PM{<:BlasFloat})
+    require_one_based_indexing(APv)
+    chkstride1(APv)
+    return pptrf!(uplo, packedside(AP), APv)
 end
 
-@doc raw"""
-    pptrf!(uplo, AP::AbstractVector)
-    pptrf!(AP::PackedMatrixUnscaled)
+@doc """
+    pptrf!(uplo, AP::AbstractVector) -> (AP, info)
+    pptrf!(AP::PackedMatrix) -> (AP, info)
 
 `pptrf!` computes the Cholesky factorization of a real symmetric or complex Hermitian positive definite matrix ``A`` stored in
 packed format `AP`.
@@ -898,17 +956,20 @@ The factorization has the form
 - ``A = U' U``,  if `uplo == 'U'`, or
 - ``A = L L'``,  if `uplo == 'L'`,
 where ``U`` is an upper triangular matrix and ``L`` is lower triangular.
+
+If `info > 0`, the leading minor of order `info` is not positive definite, and the factorization could not be completed.
+$warnunscale
 """
 pptrf!
 
 @pmalso function pptrs!(uplo::AbstractChar, AP::PM{T}, B::AbstractVecOrMat{T}) where {T<:BlasFloat}
-    require_one_based_indexing(AP, B)
-    chkstride1(AP, B)
+    require_one_based_indexing(APv, B)
+    chkstride1(APv, B)
     n = packedside(AP)
     nrhs = size(B, 2)
     size(B, 1) == n || throw(DimensionMismatch("first dimension of B, $(size(B,1)), and size of A, ($n,$n), must match!"))
     iszero(nrhs) && return B
-    return pptrs!(uplo, n, nrhs, AP, B, max(1, stride(B, 2)))
+    return pptrs!(uplo, n, nrhs, APv, B, max(1, stride(B, 2)))
 end
 
 @doc raw"""
@@ -921,9 +982,9 @@ storage `AP` using the Cholesky factorization ``A = U' U`` or ``A = L L'`` compu
 pptrs!
 
 @pmalso function pptri!(uplo::AbstractChar, AP::PM{<:BlasFloat})
-    require_one_based_indexing(AP)
-    chkstride1(AP)
-    return pptri!(uplo, length(AP), packedside(AP))
+    require_one_based_indexing(APv)
+    chkstride1(APv)
+    return pptri!(uplo, packedside(AP), APv)
 end
 
 @doc raw"""
@@ -936,10 +997,10 @@ factorization ``A = U' U`` or ``A = L L'`` computed by [`pptrf!`](@ref).
 pptri!
 
 @doubledoc psv begin
-    @pmalso function $f(uplo::AbstractChar, AP::PM{T}, ipiv::Union{<:AbstractVector{BlasInt},Missing},
+    @pmalso :unscale function $f(uplo::AbstractChar, AP::PM{T}, ipiv::Union{<:AbstractVector{BlasInt},Missing},
         B::AbstractVecOrMat{T}) where {T<:$T}
-        require_one_based_indexing(AP, B)
-        chkstride1(AP, B)
+        require_one_based_indexing(APv, B)
+        chkstride1(APv, B)
         n = packedside(AP)
         size(B, 1) == n || throw(DimensionMismatch("B has first dimension $(size(B, 1)), but needs $n"))
         if ismissing(ipiv)
@@ -949,15 +1010,15 @@ pptri!
             require_one_based_indexing(ipiv)
             chkstride1(ipiv)
         end
-        return $f(uplo, n, size(B, 2), AP, ipiv, B, max(1, stride(B, 2)))
+        return $f(uplo, n, size(B, 2), APv, ipiv, B, max(1, stride(B, 2)))
     end
-    @pmalso function $f(uplo::AbstractChar, AP::PM{T}, B::AbstractVecOrMat{T}) where {T<:$T}
+    @pmalso :unscale function $f(uplo::AbstractChar, AP::PM{T}, B::AbstractVecOrMat{T}) where {T<:$T}
         return $f(uplo, AP, missing, B)
     end
 
 """
     $($fn)(uplo, AP::AbstractVector, ipiv=missing, B) -> (B, AP, ipiv)
-    $($fn)(AP::PackedMatrixUnscaled, ipiv=missing, B) -> (B, AP, ipiv)
+    $($fn)(AP::PackedMatrix, ipiv=missing, B) -> (B, AP, ipiv)
 
 `$($fn)` computes the solution to a $($field) system of linear equations ``A X = B``, where ``A`` is an ``N``-by-``N`` $($typ)
 matrix stored in packed format `AP` and ``X`` and `B` are ``N``-by-``N_{\\mathrm{rhs}}`` matrices.
@@ -967,14 +1028,15 @@ The diagonal pivoting method is used to factor ``A`` as
 - ``A = L D L$($op)``,  if `UPLO = 'L'`,
 where `U` (or `L`) is a product of permutation and unit upper (lower) triangular matrices, `D` is $($typ) and block diagonal
 with 1-by-1 and 2-by-2 diagonal blocks. The factored form of ``A`` is then used to solve the system of equations ``A X = B``.
+$($warnunscale)
 """
     $f
 end
 
 @doubledoc ptrf begin
-    @pmalso function $f(uplo::AbstractChar, AP::PM{$T}, ipiv::Union{<:AbstractVector{BlasInt},Missing}=missing)
-        require_one_based_indexing(AP)
-        chkstride1(AP)
+    @pmalso :unscale function $f(uplo::AbstractChar, AP::PM{$T}, ipiv::Union{<:AbstractVector{BlasInt},Missing}=missing)
+        require_one_based_indexing(APv)
+        chkstride1(APv)
         n = packedside(AP)
         if ismissing(ipiv)
             ipiv = Vector{BlasInt}(undef, n)
@@ -983,12 +1045,12 @@ end
             require_one_based_indexing(ipiv)
             chkstride1(ipiv)
         end
-        return $f(uplo, n, AP, ipiv)
+        return $f(uplo, n, APv, ipiv)
     end
 
 """
     $($fn)(uplo, AP::AbstractVector, ipiv=missing) -> (AP, ipiv, info)
-    $($fn)(AP::PackedMatrixUnscaled, ipiv=missing) -> (AP, ipiv, info)
+    $($fn)(AP::PackedMatrix, ipiv=missing) -> (AP, ipiv, info)
 
 `$($fn)` computes the factorization of a $($field) $($typ) matrix ``A`` stored in packed format `AP` using the Bunch-Kaufman
 diagonal pivoting method:
@@ -997,23 +1059,24 @@ diagonal pivoting method:
 
 where ``U`` (or ``L``) is a product of permutation and unit upper (lower) triangular matrices, and ``D`` is $($typ) and block
 diagonal with 1-by-1 and 2-by-2 diagonal blocks.
+$($warnunscale)
 """
     $f
 end
 
 @doubledoc ptrs begin
     @pmalso function $f(uplo::AbstractChar, AP::PM{T}, ipiv::AbstractVector{BlasInt}, B::AbstractVecOrMat{T}) where {T<:$T}
-        require_one_based_indexing(AP, B, ipiv)
-        chkstride1(AP, B, ipiv)
+        require_one_based_indexing(APv, B, ipiv)
+        chkstride1(APv, B, ipiv)
         n = length(ipiv)
-        chkpacked(AP, n)
+        chkpacked(n, AP)
         size(B, 1) == n || throw(DimensionMismatch("B has first dimension $(size(B, 1)), but needs $n"))
         return $f(uplo, n, size(B, 2), AP, ipiv, B, max(1, stride(B, 2)))
     end
 
 """
-    $($fn)(uplo, AP::AbstractVector, ipiv=missing, B)
-    $($fn)(AP::PackedMatrixUnscaled, ipiv=missing, B)
+    $($fn)(uplo, AP::AbstractVector, ipiv, B)
+    $($fn)(AP::PackedMatrixUnscaled, ipiv, B)
 
 `$($fn)` solves a system of linear equations ``A X = B`` with a $($field) $($typ) matrix ``A`` stored in packed format using
 the factorization ``A = U D U$($op)`` or ``A = L D L$($op)`` computed by [`$($prefix)ptrf!`](@ref).
@@ -1024,8 +1087,8 @@ end
 @doubledoc ptri begin
     @pmalso function $f(uplo::AbstractChar, AP::PM{T}, ipiv::AbstractVector{BlasInt},
         work::Union{<:AbstractVector{T},Missing}=missing) where {T<:$T}
-        require_one_based_indexing(AP, ipiv)
-        chkstride1(AP, ipiv)
+        require_one_based_indexing(APv, ipiv)
+        chkstride1(APv, ipiv)
         n = length(ipiv)
         chkpacked(n, AP)
         if ismissing(work)
@@ -1035,7 +1098,7 @@ end
             require_one_based_indexing(work)
             chkstride1(work)
         end
-        return $f(uplo, n, AP, ipiv, work)
+        return $f(uplo, n, APv, ipiv, work)
     end
 
 """
@@ -1050,10 +1113,10 @@ end
 
 spev!(jobz::AbstractChar, args...) = spev!(Val(Symbol(jobz)), args...)
 
-@pmalso function spev!(::Val{:N}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{T},Missing}=missing,
+@pmalso :diagscale function spev!(::Val{:N}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{T},Missing}=missing,
     work::Union{<:AbstractVector{T},Missing}=missing) where {T<:BlasReal}
-    require_one_based_indexing(AP)
-    chkstride1(AP)
+    require_one_based_indexing(APv)
+    chkstride1(APv)
     if ismissing(W)
         n = packedside(AP)
         W = Vector{T}(undef, n)
@@ -1061,7 +1124,7 @@ spev!(jobz::AbstractChar, args...) = spev!(Val(Symbol(jobz)), args...)
         n = length(W)
         chkpacked(n, AP)
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(work)
         work = Vector{T}(undef, 3n)
@@ -1070,13 +1133,14 @@ spev!(jobz::AbstractChar, args...) = spev!(Val(Symbol(jobz)), args...)
         require_one_based_indexing(work)
         chkstride1(work)
     end
-    return spev!('N', uplo, n, AP, W, Ptr{T}(C_NULL), 1, work)[1]
+    evs, _ = spev!('N', uplo, n, APv, W, Ptr{T}(C_NULL), 1, work)
+    return PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs
 end
 
-@pmalso function spev!(::Val{:V}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{T},Missing}=missing,
+@pmalso :diagscale function spev!(::Val{:V}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{T},Missing}=missing,
     Z::Union{<:AbstractMatrix{T},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing) where {T<:BlasReal}
-    require_one_based_indexing(AP)
-    chkstride1(AP)
+    require_one_based_indexing(APv)
+    chkstride1(APv)
     if ismissing(W)
         n = packedside(AP)
         W = Vector{T}(undef, n)
@@ -1084,7 +1148,7 @@ end
         n = length(W)
         chkpacked(n, AP)
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(Z)
         Z = Matrix{T}(undef, n, n)
@@ -1100,14 +1164,15 @@ end
         require_one_based_indexing(work)
         chkstride1(work)
     end
-    return spev!('V', uplo, n, AP, W, Z, max(1, stride(Z, 2)), work)
+    evs, evecs = spev!('V', uplo, n, APv, W, Z, max(1, stride(Z, 2)), work)
+    return (PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs), evecs
 end
 
-@pmalso function spev!(::Val{:N}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{R},Missing}=missing,
+@pmalso :diagscale function spev!(::Val{:N}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{R},Missing}=missing,
     work::Union{<:AbstractVector{T},Missing}=missing,
     rwork::Union{<:AbstractVector{R},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
-    require_one_based_indexing(AP)
-    chkstride1(AP)
+    require_one_based_indexing(APv)
+    chkstride1(APv)
     if ismissing(W)
         n = packedside(AP)
         W = Vector{R}(undef, n)
@@ -1115,7 +1180,7 @@ end
         n = length(W)
         chkpacked(n, AP)
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(work)
         work = Vector{T}(undef, max(1, 2n -1))
@@ -1131,14 +1196,15 @@ end
         require_one_based_indexing(rwork)
         chkstride1(rwork)
     end
-    return spev!('N', uplo, n, AP, W, Ptr{T}(C_NULL), 1, work, rwork)[1]
+    evs, _ = spev!('N', uplo, n, APv, W, Ptr{T}(C_NULL), 1, work, rwork)
+    return PM <: PackedMatrixScaled && rmul!(evs, inv(scalefac)) : evs
 end
 
-@pmalso function spev!(::Val{:V}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{R},Missing}=missing,
+@pmalso :diagscale function spev!(::Val{:V}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{R},Missing}=missing,
     Z::Union{<:AbstractMatrix{T},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing,
     rwork::Union{<:AbstractVector{R},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
-    require_one_based_indexing(AP)
-    chkstride1(AP)
+    require_one_based_indexing(APv)
+    chkstride1(APv)
     if ismissing(W)
         n = packedside(AP)
         W = Vector{R}(undef, n)
@@ -1146,7 +1212,7 @@ end
         n = length(W)
         chkpacked(n, AP)
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(Z)
         Z = Matrix{T}(undef, n, n)
@@ -1169,34 +1235,38 @@ end
         require_one_based_indexing(rwork)
         chkstride1(rwork)
     end
-    return spev!('V', uplo, n, AP, W, Z, max(1, stride(Z, 2)), work, rwork)
+    evs, evecs = spev!('V', uplo, n, APv, W, Z, max(1, stride(Z, 2)), work, rwork)
+    return (PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs), evecs
 end
 
 """
     spev!('N', uplo, AP::AbstractVector, W=missing, work=missing[, rwork=missing]) -> W
-    spev!('N', AP::PackedMatrixUnscaled, W=missing, work=missing[, rwork=missing]) -> W
-    spev!('V', uplo, AP::AbstractVector, W=missing, Z=missing, work=missing[, rwork=missing]) -> W, Z
-    spev!('V', AP::PackedMatrixUnscaled, W=missing, Z=missing, work=missing[, rwork=missing]) -> W, Z
+    spev!('N', AP::PackedMatrix, W=missing, work=missing[, rwork=missing]) -> W
+    spev!('V', uplo, AP::AbstractVector, W=missing, Z=missing, work=missing
+        [, rwork=missing]) -> (W, Z)
+    spev!('V', AP::PackedMatrix, W=missing, Z=missing, work=missing[, rwork=missing])
+        -> (W, Z)
 
 Finds the eigenvalues (first parameter `'N'`) or eigenvalues and eigenvectors (first parameter `'V'`) of a Hermitian matrix
-``A`` in packed storage `AP`. If `uplo = U`, `AP` is the upper triangle of ``A``. If `uplo = L`, `AP` is the lower triangle of
-``A``. The output vector `W` and matrix `Z`, as well as the temporaries `work` and `rwork` (in the complex case) may be
-specified to save allocations.
+``A`` in packed storage `AP`. If `uplo = 'U'`, `AP` is the upper triangle of ``A``. If `uplo = 'L'`, `AP` is the lower triangle
+of ``A``.
+
+The output vector `W` and matrix `Z`, as well as the temporaries `work` and `rwork` (in the complex case) may be specified to
+save allocations.
 """
 spev!
 
 spevx!(jobz::AbstractChar, args...) = spevx!(Val(Symbol(jobz)), args...)
-@pmalso function spevx!(jobz::Val, uplo::AbstractChar, AP::PM{T}) where {T<:BlasFloat}
-    return spevx!(jobz, 'A', uplo, AP, nothing, nothing, nothing, nothing, _realtype(T)(-1))
-end
+spevx!(jobz::Val, uplo::AbstractChar, AP::Union{<:AbstractVector,<:PackedMatrix}) =
+    spevx!(jobz, 'A', uplo, AP, nothing, nothing, nothing, nothing, _realtype(T)(-1))
 
-@pmalso function spevx!(::Val{:N}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, vl::Union{Nothing,T},
+@pmalso :diagscale function spevx!(::Val{:N}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, vl::Union{Nothing,T},
     vu::Union{Nothing,T}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::T,
     W::Union{<:AbstractVector{T},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing,
     iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {T<:BlasReal}
     @nospecialize vl vu il iu
-    require_one_based_indexing(AP)
-    chkstride1(AP)
+    require_one_based_indexing(APv)
+    chkstride1(APv)
     n = packedside(AP)
     if ismissing(W)
         W = Vector{T}(undef, range == 'I' ? iu - il + 1 : n)
@@ -1208,7 +1278,7 @@ end
         end
         # we cannot check 'V'
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(work)
         work = Vector{T}(undef, 8n)
@@ -1224,20 +1294,22 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    m = Ref{BlasInt}()
-    spevx!('N', range, uplo, n, AP, vl, vu, il, iu, abstol, m, W, Ptr{T}(C_NULL), 1, work, iwork, Ptr{BlasInt}(C_NULL))
-    return @view(W[1:m[]])
+    PM <: PackedMatrixScaled && !isnothing(vl) && (vl *= scalefac)
+    PM <: PackedMatrixScaled && !isnothing(vu) && (vu *= scalefac)
+    m, _, _, _, _ = spevx!('N', range, uplo, n, APv, vl, vu, il, iu, abstol, W, Ptr{T}(C_NULL), 1, work, iwork,
+        Ptr{BlasInt}(C_NULL))
+    return PM <: PackedMatrixScaled ? rmul!(@view(W[1:m]), inv(scalefac)) : @view(W[1:m])
 end
 
-@pmalso function spevx!(::Val{:V}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, vl::Union{Nothing,T},
+@pmalso :diagscale function spevx!(::Val{:V}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, vl::Union{Nothing,T},
     vu::Union{Nothing,T}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::T,
     W::Union{<:AbstractVector{T},Missing}=missing, Z::Union{<:AbstractMatrix{T},Missing}=missing,
     work::Union{<:AbstractVector{T},Missing}=missing,
     iwork::Union{<:AbstractVector{BlasInt},Missing}=missing,
     ifail::Union{<:AbstractVector{BlasInt},Missing}=missing) where {T<:BlasReal}
     @nospecialize vl vu il iu
-    require_one_based_indexing(AP)
-    chkstride1(AP)
+    require_one_based_indexing(APv)
+    chkstride1(APv)
     n = packedside(AP)
     if ismissing(W)
         W = Vector{T}(undef, range == 'I' ? iu - il + 1 : n)
@@ -1249,7 +1321,7 @@ end
         end
         # we cannot check 'V'
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(Z)
         Z = Matrix{T}(undef, n, range == 'I' ? iu - il + 1 : n)
@@ -1285,19 +1357,21 @@ end
         require_one_based_indexing(ifail)
         chkstride1(ifail)
     end
-    m = Ref{BlasInt}()
-    _, _, info, _ = spevx!('V', range, uplo, n, AP, vl, vu, il, iu, abstol, m, W, Z, max(1, stride(Z, 2)), work, iwork, ifail)
-    return @view(W[1:m[]]), @view(Z[:, 1:m[]]), info, @view(ifail[1:m[]])
+    PM <: PackedMatrixScaled && !isnothing(vl) && (vl *= scalefac)
+    PM <: PackedMatrixScaled && !isnothing(vu) && (vu *= scalefac)
+    m, _, _, info, _ = spevx!('V', range, uplo, n, APv, vl, vu, il, iu, abstol, W, Z, max(1, stride(Z, 2)), work, iwork, ifail)
+    return (PM <: PackedMatrixScaled ? rmul!(@view(W[1:m]), inv(scalefac)) : @view(W[1:m])),
+        @view(Z[:, 1:m]), info, @view(ifail[1:m])
 end
 
-@pmalso function spevx!(::Val{:N}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, vl::Union{Nothing,R},
+@pmalso :diagscale function spevx!(::Val{:N}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, vl::Union{Nothing,R},
     vu::Union{Nothing,R}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::R,
     W::Union{<:AbstractVector{R},Missing}=missing,
     work::Union{<:AbstractVector{T},Missing}=missing, rwork::Union{<:AbstractVector{R},Missing}=missing,
     iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
     @nospecialize vl vu il iu
-    require_one_based_indexing(AP)
-    chkstride1(AP)
+    require_one_based_indexing(APv)
+    chkstride1(APv)
     n = packedside(AP)
     if ismissing(W)
         W = Vector{R}(undef, range == 'I' ? iu - il + 1 : n)
@@ -1309,7 +1383,7 @@ end
         end
         # we cannot check 'V'
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(work)
         work = Vector{T}(undef, 2n)
@@ -1332,20 +1406,22 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    m = Ref{BlasInt}()
-    spevx!('N', range, uplo, n, AP, vl, vu, il, iu, abstol, m, W, Ptr{T}(C_NULL), 1, work, rwork, iwork, Ptr{BlasInt}(C_NULL))
-    return @view(W[1:m[]])
+    PM <: PackedMatrixScaled && !isnothing(vl) && (vl *= scalefac)
+    PM <: PackedMatrixScaled && !isnothing(vu) && (vu *= scalefac)
+    m, _, _, _, _, = spevx!('N', range, uplo, n, APv, vl, vu, il, iu, abstol, W, Ptr{T}(C_NULL), 1, work, rwork, iwork,
+        Ptr{BlasInt}(C_NULL))
+    return PM <: PackedMatrixScaled ? rmul!(@view(W[1:m]), inv(scalefac)) : @view(W[1:m])
 end
 
-@pmalso function spevx!(::Val{:V}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, vl::Union{Nothing,R},
+@pmalso :diagscale function spevx!(::Val{:V}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, vl::Union{Nothing,R},
     vu::Union{Nothing,R}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::R,
     W::Union{<:AbstractVector{R},Missing}=missing, Z::Union{<:AbstractMatrix{T},Missing}=missing,
     work::Union{<:AbstractVector{T},Missing}=missing, rwork::Union{<:AbstractVector{R},Missing}=missing,
     iwork::Union{<:AbstractVector{BlasInt},Missing}=missing,
     ifail::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
     @nospecialize vl vu il iu
-    require_one_based_indexing(AP)
-    chkstride1(AP)
+    require_one_based_indexing(APv)
+    chkstride1(APv)
     n = packedside(AP)
     if ismissing(W)
         W = Vector{R}(undef, range == 'I' ? iu - il + 1 : n)
@@ -1357,7 +1433,7 @@ end
         end
         # we cannot check 'V'
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(Z)
         Z = Matrix{R}(undef, n, range == 'I' ? iu - il + 1 : n)
@@ -1400,44 +1476,48 @@ end
         require_one_based_indexing(ifail)
         chkstride1(ifail)
     end
-    m = Ref{BlasInt}()
-    _, _, info, _ = spevx!('V', range, uplo, n, AP, vl, vu, il, iu, abstol, m, W, Z, max(1, stride(Z, 2)), work, rwork, iwork,
+    PM <: PackedMatrixScaled && !isnothing(vl) && (vl *= scalefac)
+    PM <: PackedMatrixScaled && !isnothing(vu) && (vu *= scalefac)
+    m, _, _, info, _ = spevx!('V', range, uplo, n, APv, vl, vu, il, iu, abstol, W, Z, max(1, stride(Z, 2)), work, rwork, iwork,
         ifail)
-    return @view(W[1:m[]]), @view(Z[:, 1:m[]]), info, @view(ifail[])
+    return (PM <: PackedMatrixScaled ? rmul!(@view(W[1:m]), inv(scalefac)) : @view(W[1:m])),
+        @view(Z[:, 1:m]), info, @view(ifail[])
 end
 
 """
-    spevx!('N', range, uplo, AP::AbstractVector, vl, vu, il, iu, abstol, W=missing, work=missing,
-        [rwork=missing,] iwork=missing) -> view(W)
-    spevx!('N', range, AP::PackedMatrixUnscaled, vl, vu, il, iu, abstol, W=missing, work=missing,
-        [rwork=missing,] iwork=missing) -> view(W)
-    spevx!('V', range, uplo, AP::AbstractVector, vl, vu, il, iu, abstol, W=missing, Z=missing, work=missing,
-        [rwork=missing,] iwork=missing, ifail=missing)
-        -> view(W), view(Z), info, view(ifail)
-    spevx!('V', range, AP::PackedMatrixUnscaled, vl, vu, il, iu, abstol, W=missing, Z=missing, work=missing,
-        [rwork=missing,] iwork=missing, ifail=missing)
-        -> view(W), view(Z), info, view(ifail)
+    spevx!('N', range, uplo, AP::AbstractVector, vl, vu, il, iu, abstol, W=missing,
+        work=missing[, rwork=missing], iwork=missing) -> view(W)
+    spevx!('N', range, AP::PackedMatrix, vl, vu, il, iu, abstol, W=missing, work=missing
+        [, rwork=missing], iwork=missing) -> view(W)
+    spevx!('V', range, uplo, AP::AbstractVector, vl, vu, il, iu, abstol, W=missing,
+        Z=missing, work=missing[, rwork=missing], iwork=missing, ifail=missing)
+        -> (view(W), view(Z), info, view(ifail))
+    spevx!('V', range, AP::PackedMatrix, vl, vu, il, iu, abstol, W=missing, Z=missing,
+        work=missing[, rwork=missing], iwork=missing, ifail=missing)
+        -> (view(W), view(Z), info, view(ifail))
 
 Finds the eigenvalues (first parameter `'N'`) or eigenvalues and eigenvectors (first parameter `'V'`) of a Hermitian matrix
-``A`` in packed storage `AP`. If `uplo = U`, `AP` is the upper triangle of ``A``. If `uplo = L`, `AP` is the lower triangle of
-``A``. If `range = 'A'`, all the eigenvalues are found. If `range = 'V'`, the eigenvalues in the half-open interval `(vl, vu]`
-are found. If `range = 'I'`, the eigenvalues with indices between `il` and `iu` are found. `abstol` can be set as a tolerance
-for convergence. The output vector `W`, `ifail` and matrix `Z`, as well as the temporaries `work`, `rwork` (in the complex
-case), and `iwork` may be specified to save allocations.
+``A`` in packed storage `AP`. If `uplo = 'U'`, `AP` is the upper triangle of ``A``. If `uplo = 'L'`, `AP` is the lower triangle
+of ``A``. If `range = 'A'`, all the eigenvalues are found. If `range = 'V'`, the eigenvalues in the half-open interval
+`(vl, vu]` are found. If `range = 'I'`, the eigenvalues with indices between `il` and `iu` are found. `abstol` can be set as a
+tolerance for convergence.
 
 The eigenvalues are returned in `W` and the eigenvectors in `Z`. `info` is zero upon success or the number of eigenvalues that
 failed to converge; their indices are stored in `ifail`. The resulting views to the original data are sized according to the
 number of eigenvalues that fulfilled the bounds given by the range.
+
+The output vector `W`, `ifail` and matrix `Z`, as well as the temporaries `work`, `rwork` (in the complex case), and `iwork`
+may be specified to save allocations.
 """
 spevx!
 
 spevd!(jobz::AbstractChar, args...) = spevd!(Val(Symbol(jobz)), args...)
 
-@pmalso function spevd!(::Val{:N}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{T},Missing}=missing,
+@pmalso :diagscale function spevd!(::Val{:N}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{T},Missing}=missing,
     work::Union{<:AbstractVector{T},Missing}=missing,
     iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {T<:BlasReal}
-    require_one_based_indexing(AP)
-    chkstride1(AP)
+    require_one_based_indexing(APv)
+    chkstride1(APv)
     if ismissing(W)
         n = packedside(AP)
         W = Vector{T}(undef, n)
@@ -1445,7 +1525,7 @@ spevd!(jobz::AbstractChar, args...) = spevd!(Val(Symbol(jobz)), args...)
         n = length(W)
         chkpacked(n, AP)
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(work)
         work = Vector{T}(undef, n ≤ 1 ? 1 : 2n)
@@ -1461,14 +1541,15 @@ spevd!(jobz::AbstractChar, args...) = spevd!(Val(Symbol(jobz)), args...)
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    return spevd!('N', uplo, n, AP, W, Ptr{T}(C_NULL), 1, work, length(work), iwork, length(iwork))[1]
+    evs, _ = spevd!('N', uplo, n, APv, W, Ptr{T}(C_NULL), 1, work, length(work), iwork, length(iwork))
+    return PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs
 end
 
-@pmalso function spevd!(::Val{:V}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{T},Missing}=missing,
+@pmalso :diagscale function spevd!(::Val{:V}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{T},Missing}=missing,
     Z::Union{<:AbstractMatrix{T},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing,
     iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {T<:BlasReal}
-    require_one_based_indexing(AP)
-    chkstride1(AP)
+    require_one_based_indexing(APv)
+    chkstride1(APv)
     if ismissing(W)
         n = packedside(AP)
         W = Vector{T}(undef, n)
@@ -1476,7 +1557,7 @@ end
         n = length(W)
         chkpacked(n, AP)
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(Z)
         Z = Matrix{T}(undef, n, n)
@@ -1499,14 +1580,15 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    return spevd!('V', uplo, n, AP, W, Z, max(1, stride(Z, 2)), work, length(work), iwork, length(iwork))
+    evs, evecs = spevd!('V', uplo, n, APv, W, Z, max(1, stride(Z, 2)), work, length(work), iwork, length(iwork))
+    return (PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs), evecs
 end
 
-@pmalso function spevd!(::Val{:N}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{R},Missing}=missing,
+@pmalso :diagscale function spevd!(::Val{:N}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{R},Missing}=missing,
     work::Union{<:AbstractVector{T},Missing}=missing, rwork::Union{<:AbstractVector{R},Missing}=missing,
     iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
-    require_one_based_indexing(AP)
-    chkstride1(AP)
+    require_one_based_indexing(APv)
+    chkstride1(APv)
     if ismissing(W)
         n = packedside(AP)
         W = Vector{R}(undef, n)
@@ -1514,7 +1596,7 @@ end
         n = length(W)
         chkpacked(n, AP)
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(work)
         work = Vector{T}(undef, n ≤ 1 ? 1 : n)
@@ -1537,15 +1619,16 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    return spevd!('N', uplo, n, AP, W, Ptr{T}(C_NULL), 1, work, length(work), rwork, length(rwork), iwork, length(iwork))[1]
+    evs, _ = spevd!('N', uplo, n, APv, W, Ptr{T}(C_NULL), 1, work, length(work), rwork, length(rwork), iwork, length(iwork))
+    return PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs
 end
 
-@pmalso function spevd!(::Val{:V}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{R},Missing}=missing,
+@pmalso :diagscale function spevd!(::Val{:V}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{R},Missing}=missing,
     Z::Union{<:AbstractMatrix{T},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing,
     rwork::Union{<:AbstractVector{R},Missing}=missing,
     iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
-    require_one_based_indexing(AP)
-    chkstride1(AP)
+    require_one_based_indexing(APv)
+    chkstride1(APv)
     if ismissing(W)
         n = packedside(AP)
         W = Vector{R}(undef, n)
@@ -1553,7 +1636,7 @@ end
         n = length(W)
         chkpacked(n, AP)
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(Z)
         Z = Matrix{T}(undef, n, n)
@@ -1583,21 +1666,27 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    return spevd!('V', uplo, n, AP, W, Z, max(1, stride(Z, 2)), work, length(work), rwork, length(rwork), iwork, length(iwork))
+    evs, evecs = spevd!('V', uplo, n, APv, W, Z, max(1, stride(Z, 2)), work, length(work), rwork, length(rwork), iwork,
+        length(iwork))
+    return (PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs), evecs
 end
 
 """
-    spevd!('N', uplo, AP::AbstractVector, W=missing, work=missing[, rwork=missing], iwork=missing) -> W
-    spevd!('N', AP::PackedMatrixUnscaled, W=missing, work=missing[, rwork=missing], iwork=missing) -> W
-    spevd!('V', uplo, AP::AbstractVector, W=missing, Z=missing, work=missing[, rwork=missing], iwork=missing)
-        -> W, Z
-    spevd!('V', AP::PackedMatrixUnscaled, W=missing, Z=missing, work=missing[, rwork=missing], iwork=missing)
-        -> W, Z
+    spevd!('N', uplo, AP::AbstractVector, W=missing, work=missing[, rwork=missing],
+        iwork=missing) -> W
+    spevd!('N', AP::PackedMatrix, W=missing, work=missing[, rwork=missing],
+        iwork=missing) -> W
+    spevd!('V', uplo, AP::AbstractVector, W=missing, Z=missing, work=missing
+        [, rwork=missing], iwork=missing) -> (W, Z)
+    spevd!('V', AP::PackedMatrix, W=missing, Z=missing, work=missing[, rwork=missing],
+        iwork=missing) -> (W, Z)
 
 Finds the eigenvalues (first parameter `'N'`) or eigenvalues and eigenvectors (first parameter `'V'`) of a Hermitian matrix
-``A`` in packed storage `AP`. If `uplo = U`, `AP` is the upper triangle of ``A``. If `uplo = L`, `AP` is the lower triangle of
-``A``. The output vector `W` and matrix `Z`, as well as the temporaries `work`, `rwork` (in the complex case), and `iwork` may
-be specified to save allocations.
+``A`` in packed storage `AP`. If `uplo = 'U'`, `AP` is the upper triangle of ``A``. If `uplo = 'L'`, `AP` is the lower triangle
+of ``A``.
+
+The output vector `W` and matrix `Z`, as well as the temporaries `work`, `rwork` (in the complex case), and `iwork` may be
+specified to save allocations.
 
 If eigenvectors are desired, it uses a divide and conquer algorithm.
 """
@@ -1605,11 +1694,11 @@ spevd!
 
 spgv!(itype::Integer, jobz::AbstractChar, args...) = spgv!(itype, Val(Symbol(jobz)), args...)
 
-@pmalso function spgv!(itype::Integer, ::Val{:N}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+@pmalso :unscale function spgv!(itype::Integer, ::Val{:N}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
     W::Union{<:AbstractVector{T},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing) where {T<:BlasReal}
-    require_one_based_indexing(AP, BP)
-    chkstride1(AP, BP)
-    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    require_one_based_indexing(APv, BPv)
+    chkstride1(APv, BPv)
+    length(APv) == length(BPv) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
     if ismissing(W)
         n = packedside(AP)
         W = Vector{T}(undef, n)
@@ -1617,7 +1706,7 @@ spgv!(itype::Integer, jobz::AbstractChar, args...) = spgv!(itype, Val(Symbol(job
         n = length(W)
         chkpacked(n, AP)
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(work)
         work = Vector{T}(undef, 3n)
@@ -1626,15 +1715,16 @@ spgv!(itype::Integer, jobz::AbstractChar, args...) = spgv!(itype, Val(Symbol(job
         require_one_based_indexing(work)
         chkstride1(work)
     end
-    return spgv!(itype, 'N', uplo, n, AP, BP, W, Ptr{T}(C_NULL), 1, work)[1]
+    evs, _ = spgv!(itype, 'N', uplo, n, APv, BPv, W, Ptr{T}(C_NULL), 1, work)
+    return evs, BP
 end
 
-@pmalso function spgv!(itype::Integer, ::Val{:V}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+@pmalso :unscale function spgv!(itype::Integer, ::Val{:V}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
     W::Union{<:AbstractVector{T},Missing}=missing, Z::Union{<:AbstractMatrix{T},Missing}=missing,
     work::Union{<:AbstractVector{T},Missing}=missing) where {T<:BlasReal}
-    require_one_based_indexing(AP, BP)
-    chkstride1(AP, BP)
-    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    require_one_based_indexing(APv, BPv)
+    chkstride1(APv, BPv)
+    length(APv) == length(BPv) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
     if ismissing(W)
         n = packedside(AP)
         W = Vector{T}(undef, n)
@@ -1642,7 +1732,7 @@ end
         n = length(W)
         chkpacked(n, AP)
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(Z)
         Z = Matrix{T}(undef, n, n)
@@ -1658,15 +1748,16 @@ end
         require_one_based_indexing(work)
         chkstride1(work)
     end
-    return spgv!(itype, 'V', uplo, n, AP, BP, W, Z, max(1, stride(Z, 2)), work)
+    evs, evecs = spgv!(itype, 'V', uplo, n, APv, BPv, W, Z, max(1, stride(Z, 2)), work)
+    return evs, evecs, BP
 end
 
-@pmalso function spgv!(itype::Integer, ::Val{:N}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+@pmalso :unscale function spgv!(itype::Integer, ::Val{:N}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
     W::Union{<:AbstractVector{R},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing,
     rwork::Union{<:AbstractVector{R},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
-    require_one_based_indexing(AP, BP)
-    chkstride1(AP, BP)
-    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    require_one_based_indexing(APv, BPv)
+    chkstride1(APv, BPv)
+    length(APv) == length(BPv) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
     if ismissing(W)
         n = packedside(AP)
         W = Vector{R}(undef, n)
@@ -1674,7 +1765,7 @@ end
         n = length(W)
         chkpacked(n, AP)
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(work)
         work = Vector{T}(undef, max(1, 2n -1))
@@ -1690,16 +1781,17 @@ end
         require_one_based_indexing(rwork)
         chkstride1(rwork)
     end
-    return spgv!(itype, 'N', uplo, n, AP, BP, W, Ptr{T}(C_NULL), 1, work, rwork)[1]
+    evs, _ = spgv!(itype, 'N', uplo, n, APv, BPv, W, Ptr{T}(C_NULL), 1, work, rwork)
+    return evs, BP
 end
 
-@pmalso function spgv!(itype::Integer, ::Val{:V}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+@pmalso :unscale function spgv!(itype::Integer, ::Val{:V}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
     W::Union{<:AbstractVector{R},Missing}=missing, Z::Union{<:AbstractMatrix{T},Missing}=missing,
     work::Union{<:AbstractVector{T},Missing}=missing,
     rwork::Union{<:AbstractVector{R},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
-    require_one_based_indexing(AP, BP)
-    chkstride1(AP, BP)
-    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    require_one_based_indexing(APv, BPv)
+    chkstride1(APv, BPv)
+    length(APv) == length(BPv) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
     if ismissing(W)
         n = packedside(AP)
         W = Vector{R}(undef, n)
@@ -1707,7 +1799,7 @@ end
         n = length(W)
         chkpacked(n, AP)
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(Z)
         Z = Matrix{T}(undef, n, n)
@@ -1730,45 +1822,51 @@ end
         require_one_based_indexing(rwork)
         chkstride1(rwork)
     end
-    return spgv!(itype, 'V', uplo, n, AP, BP, W, Z, max(1, stride(Z, 2)), work, rwork)
+    evs, evecs = spgv!(itype, 'V', uplo, n, APv, BPv, W, Z, max(1, stride(Z, 2)), work, rwork)
+    return evs, evecs, BP
 end
 
-@doc raw"""
-    spgv!(itype, 'N', uplo, AP::AbstractVector, BP::AbstractVector, W=missing, work=missing[, rwork=missing]) -> W
-    spgv!(itype, 'V', uplo, AP::AbstractVector, BP::AbstractVector, W=missing, Z=missing, work=missing[, rwork=missing])
-        -> W, Z
-    spgv!(itype, 'N', AP::PackedMatrixUnscaled, BP::PackedMatrixUnscaled, W=missing, work=missing[, rwork=missing]) -> W
-    spgv!(itype, 'V', AP::PackedMatrixUnscaled, BP::PackedMatrixUnscaled, W=missing, Z=missing, work=missing[, rwork=missing])
-        -> W, Z
+@doc """
+    spgv!(itype, 'N', uplo, AP::AbstractVector, BP::AbstractVector, W=missing,
+        work=missing[, rwork=missing]) -> (W, BP)
+    spgv!(itype, 'N', AP::PackedMatrix, BP::PackedMatrix, W=missing, work=missing
+        [, rwork=missing]) -> (W, BP)
+    spgv!(itype, 'V', uplo, AP::AbstractVector, BP::AbstractVector, W=missing, Z=missing,
+        work=missing[, rwork=missing]) -> (W, Z, BP)
+    spgv!(itype, 'V', AP::PackedMatrix, BP::PackedMatrix, W=missing, Z=missing,
+        work=missing[, rwork=missing]) -> (W, Z, BP)
 
 Finds the generalized eigenvalues (second parameter `'N'`) or eigenvalues and eigenvectors (second parameter `'V'`) of a
 Hermitian matrix ``A`` in packed storage `AP` and Hermitian positive-definite matrix ``B`` in packed storage `BP`. If
 `uplo = 'U'`, `AP` and `BP` are the upper triangles of ``A`` and ``B``, respectively. If `uplo = 'L'`, they are the lower
 triangles.
 
-- If `itype = 1`, the problem to solve is ``A x = \lambda B x``.
-- If `itype = 2`, the problem to solve is ``A B x = \lambda x``.
-- If `itype = 3`, the problem to solve is ``B A x = \lambda x``.
+- If `itype = 1`, the problem to solve is ``A x = \\lambda B x``.
+- If `itype = 2`, the problem to solve is ``A B x = \\lambda x``.
+- If `itype = 3`, the problem to solve is ``B A x = \\lambda x``.
+
+On exit, ``B`` is overwritten with the triangular factor ``U`` or ``L`` from the Cholesky factorization ``B = U' U`` or
+``B = L L'``.
 
 The output vector `W` and matrix `Z`, as well as the temporaries `work` and `rwork` (in the complex case) may be specified to
 save allocations.
+$warnunscale
 """
 spgv!
 
 spgvx!(itype::Integer, jobz::AbstractChar, args...) = spgvx!(itype, Val(Symbol(jobz)), args...)
-@pmalso function spgvx!(itype::Integer, jobz::Val, uplo::AbstractChar, AP::PM{T}, BP::PM{T}) where {T<:BlasFloat}
-    return spgvx!(itype, jobz, 'A', uplo, AP, BP, nothing, nothing, nothing, nothing, _realtype(T)(-1))
-end
+spgvx!(itype::Integer, jobz::Val, uplo::AbstractChar, AP::PM, BP::PM) where {PM<:Union{<:AbstractVector,<:PackedMatrix}} =
+    spgvx!(itype, jobz, 'A', uplo, AP, BP, nothing, nothing, nothing, nothing, _realtype(T)(-1))
 
-@pmalso function spgvx!(itype::Integer, ::Val{:N}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+@pmalso :unscale function spgvx!(itype::Integer, ::Val{:N}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
     vl::Union{Nothing,T}, vu::Union{Nothing,T}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer},
     abstol::T, W::Union{<:AbstractVector{R},Missing}=missing,
     work::Union{<:AbstractVector{T},Missing}=missing,
     iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
     @nospecialize vl vu il iu
-    require_one_based_indexing(AP, BP)
-    chkstride1(AP, BP)
-    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    require_one_based_indexing(APv, BPv)
+    chkstride1(APv, BPv)
+    length(APv) == length(BPv) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
     n = packedside(AP)
     if ismissing(W)
         W = Vector{T}(undef, range == 'I' ? iu - il + 1 : n)
@@ -1780,7 +1878,7 @@ end
         end
         # we cannot check 'V'
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(work)
         work = Vector{T}(undef, 8n)
@@ -1796,21 +1894,20 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    m = Ref{BlasInt}()
-    spgvx!(itype, 'N', range, uplo, n, AP, BP, vl, vu, il, iu, abstol, m, W, Ptr{T}(C_NULL), 1, work, iwork,
+    m, _, _, _, _ = spgvx!(itype, 'N', range, uplo, n, APv, BPv, vl, vu, il, iu, abstol, W, Ptr{T}(C_NULL), 1, work, iwork,
         Ptr{BlasInt}(C_NULL))
-    return @view(W[1:m[]])
+    return @view(W[1:m]), BP
 end
 
-@pmalso function spgvx!(itype::Integer, ::Val{:V}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+@pmalso :unscale function spgvx!(itype::Integer, ::Val{:V}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
     vl::Union{Nothing,T}, vu::Union{Nothing,T}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::T,
     W::Union{<:AbstractVector{T},Missing}=missing, Z::Union{<:AbstractMatrix{T},Missing}=missing,
     work::Union{<:AbstractVector{T},Missing}=missing, iwork::Union{<:AbstractVector{BlasInt},Missing}=missing,
     ifail::Union{<:AbstractVector{BlasInt},Missing}=missing) where {T<:BlasReal}
     @nospecialize vl vu il iu
-    require_one_based_indexing(AP, BP)
-    chkstride1(AP, BP)
-    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    require_one_based_indexing(APv, BPv)
+    chkstride1(APv, BPv)
+    length(APv) == length(BPv) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
     n = packedside(AP)
     if ismissing(W)
         W = Vector{T}(undef, range == 'I' ? iu - il + 1 : n)
@@ -1822,7 +1919,7 @@ end
         end
         # we cannot check 'V'
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(Z)
         Z = Matrix{T}(undef, n, range == 'I' ? iu - il + 1 : n)
@@ -1858,21 +1955,20 @@ end
         require_one_based_indexing(ifail)
         chkstride1(ifail)
     end
-    m = Ref{BlasInt}()
-    _, _, info, _ = spgvx!(itype, 'V', range, uplo, n, AP, BP, vl, vu, il, iu, abstol, m, W, Z, max(1, stride(Z, 2)), work,
+    m, _, _, info, _ = spgvx!(itype, 'V', range, uplo, n, APv, BPv, vl, vu, il, iu, abstol, W, Z, max(1, stride(Z, 2)), work,
         iwork, ifail)
-    return @view(W[1:m[]]), @view(Z[:, 1:m[]]), info, @view(ifail[1:m[]])
+    return @view(W[1:m]), @view(Z[:, 1:m]), info, @view(ifail[1:m]), BP
 end
 
-@pmalso function spgvx!(itype::Integer, ::Val{:N}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+@pmalso :unscale function spgvx!(itype::Integer, ::Val{:N}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
     vl::Union{Nothing,R}, vu::Union{Nothing,R}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::R,
     W::Union{<:AbstractVector{R},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing,
     rwork::Union{<:AbstractVector{R},Missing}=missing,
     iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
     @nospecialize vl vu il iu
-    require_one_based_indexing(AP, BP)
-    chkstride1(AP, BP)
-    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    require_one_based_indexing(APv, BPv)
+    chkstride1(APv, BPv)
+    length(APv) == length(BPv) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
     n = packedside(AP)
     if ismissing(W)
         W = Vector{R}(undef, range == 'I' ? iu - il + 1 : n)
@@ -1884,7 +1980,7 @@ end
         end
         # we cannot check 'V'
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(work)
         work = Vector{T}(undef, 2n)
@@ -1907,22 +2003,21 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    m = Ref{BlasInt}()
-    spgvx!(itype, 'N', range, uplo, n, AP, BP, vl, vu, il, iu, abstol, m, W, Ptr{T}(C_NULL), 1, work, rwork, iwork,
-        Ptr{BlasInt}(C_NULL))
-    return @view(W[1:m[]])
+    m, _, _, _, _ = spgvx!(itype, 'N', range, uplo, n, APv, BPv, vl, vu, il, iu, abstol, W, Ptr{T}(C_NULL), 1, work, rwork,
+        iwork, Ptr{BlasInt}(C_NULL))
+    return @view(W[1:m]), BP
 end
 
-@pmalso function spgvx!(itype::Integer, ::Val{:V}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+@pmalso :unscale function spgvx!(itype::Integer, ::Val{:V}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
     vl::Union{Nothing,R}, vu::Union{Nothing,R}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::R,
     W::Union{<:AbstractVector{R},Missing}=missing, Z::Union{<:AbstractMatrix{T},Missing}=missing,
     work::Union{<:AbstractVector{T},Missing}=missing, rwork::Union{<:AbstractVector{R},Missing}=missing,
     iwork::Union{<:AbstractVector{BlasInt},Missing}=missing,
     ifail::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
     @nospecialize vl vu il iu
-    require_one_based_indexing(AP, BP)
-    chkstride1(AP, BP)
-    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    require_one_based_indexing(APv, BPv)
+    chkstride1(APv, BPv)
+    length(APv) == length(BPv) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
     n = packedside(AP)
     if ismissing(W)
         W = Vector{R}(undef, range == 'I' ? iu - il + 1 : n)
@@ -1934,7 +2029,7 @@ end
         end
         # we cannot check 'V'
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(Z)
         Z = Matrix{T}(undef, n, range == 'I' ? iu - il + 1 : n)
@@ -1977,50 +2072,56 @@ end
         require_one_based_indexing(ifail)
         chkstride1(ifail)
     end
-    m = Ref{BlasInt}()
-    _, _, info, _ = spgvx!(itype, 'V', range, uplo, n, AP, BP, vl, vu, il, iu, abstol, m, W, Z, max(1, stride(Z, 2)), work,
+    m, _, _, info, _ = spgvx!(itype, 'V', range, uplo, n, APv, BPv, vl, vu, il, iu, abstol, W, Z, max(1, stride(Z, 2)), work,
         rwork, iwork, ifail)
-    return @view(W[1:m[]]), @view(Z[:, 1:m[]]), info, @view(ifail[])
+    return @view(W[1:m]), @view(Z[:, 1:m]), info, @view(ifail[]), BP
 end
 
-@doc raw"""
-    spgvx!(itype, 'N', range, uplo, AP::AbstractVector, BP::AbstractVector, vl, vu, il, iu, abstol, W=missing, work=missing,
-        [rwork=missing,] iwork=missing) -> view(W)
-    spgvx!(itype, 'V', range, uplo, AP::AbstractVector, BP::AbstractVector, vl, vu, il, iu, abstol, W=missing, Z=missing,
-        work=missing[, rwork=missing], iwork=missing, ifail=missing)
-        -> view(W), view(Z), info, view(ifail)
-    spgvx!(itype, 'N', range, AP::PackedMatrixUnscaled, BP::PackedMatrixUnscaled, vl, vu, il, iu, abstol, W=missing, work=missing,
-        [rwork=missing,] iwork=missing) -> view(W)
-    spgvx!(itype, 'V', range, AP::PackedMatrixUnscaled, BP::PackedMatrixUnscaled, vl, vu, il, iu, abstol, W=missing, Z=missing,
-        work=missing[, rwork=missing], iwork=missing, ifail=missing)
-        -> view(W), view(Z), info, view(ifail)
+@doc """
+    spgvx!(itype, 'N', range, uplo, AP::AbstractVector, BP::AbstractVector, vl, vu,
+        il, iu, abstol, W=missing, work=missing[, rwork=missing], iwork=missing)
+        -> (view(W), BP)
+    spgvx!(itype, 'N', range, AP::PackedMatrix, BP::PackedMatrix, vl, vu, il, iu, abstol,
+        W=missing, work=missing[, rwork=missing], iwork=missing) -> (view(W), BP)
+    spgvx!(itype, 'V', range, uplo, AP::AbstractVector, BP::AbstractVector, vl, vu,
+        il, iu, abstol, W=missing, Z=missing, work=missing[, rwork=missing],
+        iwork=missing, ifail=missing) -> (view(W), view(Z), info, view(ifail), BP)
+    spgvx!(itype, 'V', range, AP::PackedMatrix, BP::PackedMatrix, vl, vu, il, iu, abstol,
+        W=missing, Z=missing, work=missing[, rwork=missing], iwork=missing, ifail=missing)
+        -> (view(W), view(Z), info, view(ifail), BP)
 
 Finds the generalized eigenvalues (second parameter `'N'`) or eigenvalues and eigenvectors (second parameter `'V'`) of a
 Hermitian matrix ``A`` in packed storage `AP` and Hermitian positive-definite matrix ``B`` in packed storage `BP`. If
-`uplo = U`, `AP` and `BP` are the upper triangles of ``A`` and ``B``, respectively. If `uplo = L`, they are the lower
+`uplo = 'U'`, `AP` and `BP` are the upper triangles of ``A`` and ``B``, respectively. If `uplo = 'L'`, they are the lower
 triangles. If `range = 'A'`, all the eigenvalues are found. If `range = 'V'`, the eigenvalues in the half-open interval
 `(vl, vu]` are found. If `range = 'I'`, the eigenvalues with indices between `il` and `iu` are found. `abstol` can be set as a
-tolerance for convergence. The output vector `W`, `ifail` and matrix `Z`, as well as the temporaries `work`, `rwork` (in the
-complex case), and `iwork` may be specified to save allocations.
+tolerance for convergence.
 
-- If `itype = 1`, the problem to solve is ``A x = \lambda B x``.
-- If `itype = 2`, the problem to solve is ``A B x = \lambda x``.
-- If `itype = 3`, the problem to solve is ``B A x = \lambda x``.
+- If `itype = 1`, the problem to solve is ``A x = \\lambda B x``.
+- If `itype = 2`, the problem to solve is ``A B x = \\lambda x``.
+- If `itype = 3`, the problem to solve is ``B A x = \\lambda x``.
+
+On exit, ``B`` is overwritten with the triangular factor ``U`` or ``L`` from the Cholesky factorization ``B = U' U`` or
+``B = L L'``.
 
 The eigenvalues are returned in `W` and the eigenvectors in `Z`. `info` is zero upon success or the number of eigenvalues that
 failed to converge; their indices are stored in `ifail`. The resulting views to the original data are sized according to the
 number of eigenvalues that fulfilled the bounds given by the range.
+
+The output vector `W`, `ifail` and matrix `Z`, as well as the temporaries `work`, `rwork` (in the complex case), and `iwork`
+may be specified to save allocations.
+$warnunscale
 """
 spgvx!
 
 spgvd!(itype::Integer, jobz::AbstractChar, args...) = spgvd!(itype, Val(Symbol(jobz)), args...)
 
-@pmalso function spgvd!(itype::Integer, ::Val{:N}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+@pmalso :unscale function spgvd!(itype::Integer, ::Val{:N}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
     W::Union{<:AbstractVector{T},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing,
     iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {T<:BlasReal}
-    require_one_based_indexing(AP, BP)
-    chkstride1(AP, BP)
-    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    require_one_based_indexing(APv, BPv)
+    chkstride1(APv, BPv)
+    length(APv) == length(BPv) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
     if ismissing(W)
         n = packedside(AP)
         W = Vector{T}(undef, n)
@@ -2028,7 +2129,7 @@ spgvd!(itype::Integer, jobz::AbstractChar, args...) = spgvd!(itype, Val(Symbol(j
         n = length(W)
         chkpacked(n, AP)
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(work)
         work = Vector{T}(undef, n ≤ 1 ? 1 : 2n)
@@ -2044,16 +2145,17 @@ spgvd!(itype::Integer, jobz::AbstractChar, args...) = spgvd!(itype, Val(Symbol(j
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    return spgvd!(itype, 'N', uplo, n, AP, BP, W, Ptr{T}(C_NULL), 1, work, length(work), iwork, length(iwork))[1]
+    evs, _ = spgvd!(itype, 'N', uplo, n, APv, BPv, W, Ptr{T}(C_NULL), 1, work, length(work), iwork, length(iwork))
+    return evs, BP
 end
 
-@pmalso function spgvd!(itype::Integer, ::Val{:V}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+@pmalso :unscale function spgvd!(itype::Integer, ::Val{:V}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
     W::Union{<:AbstractVector{T},Missing}=missing, Z::Union{<:AbstractMatrix{T},Missing}=missing,
     work::Union{<:AbstractVector{T},Missing}=missing,
     iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {T<:BlasReal}
-    require_one_based_indexing(AP, BP)
-    chkstride1(AP, BP)
-    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    require_one_based_indexing(APv, BPv)
+    chkstride1(APv, BPv)
+    length(APv) == length(BPv) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
     if ismissing(W)
         n = packedside(AP)
         W = Vector{T}(undef, n)
@@ -2061,7 +2163,7 @@ end
         n = length(W)
         chkpacked(n, AP)
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(Z)
         Z = Matrix{T}(undef, n, n)
@@ -2084,16 +2186,17 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    return spgvd!(itype, 'V', uplo, n, AP, BP, W, Z, max(1, stride(Z, 2)), work, length(work), iwork, length(iwork))
+    evs, evecs = spgvd!(itype, 'V', uplo, n, APv, BPv, W, Z, max(1, stride(Z, 2)), work, length(work), iwork, length(iwork))
+    return evs, evecs, BP
 end
 
-@pmalso function spgvd!(itype::Integer, ::Val{:N}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+@pmalso :unscale function spgvd!(itype::Integer, ::Val{:N}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
     W::Union{<:AbstractVector{R},Missing}=missing, work::Union{<:AbstractVector{T},Missing}=missing,
     rwork::Union{<:AbstractVector{R},Missing}=missing,
     iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
-    require_one_based_indexing(AP, BP)
-    chkstride1(AP, BP)
-    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    require_one_based_indexing(APv, BPv)
+    chkstride1(APv, BPv)
+    length(APv) == length(BPv) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
     if ismissing(W)
         n = packedside(AP)
         W = Vector{R}(undef, n)
@@ -2101,7 +2204,7 @@ end
         n = length(W)
         chkpacked(n, AP)
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(work)
         work = Vector{T}(undef, n ≤ 1 ? 1 : n)
@@ -2124,17 +2227,18 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    return spgvd!(itype, 'N', uplo, n, AP, BP, W, Ptr{T}(C_NULL), 1, work, length(work), rwork, length(rwork), iwork,
-        length(iwork))[1]
+    evs, _ = spgvd!(itype, 'N', uplo, n, APv, BPv, W, Ptr{T}(C_NULL), 1, work, length(work), rwork, length(rwork), iwork,
+        length(iwork))
+    return evs, BP
 end
 
-@pmalso function spgvd!(itype::Integer, ::Val{:V}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
+@pmalso :unscale function spgvd!(itype::Integer, ::Val{:V}, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
     W::Union{<:AbstractVector{R},Missing}=missing, Z::Union{<:AbstractMatrix{T},Missing}=missing,
     work::Union{<:AbstractVector{T},Missing}=missing, rwork::Union{<:AbstractVector{R},Missing}=missing,
     iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
-    require_one_based_indexing(AP, BP)
-    chkstride1(AP, BP)
-    length(AP) == length(BP) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
+    require_one_based_indexing(APv, BPv)
+    chkstride1(APv, BPv)
+    length(APv) == length(BPv) || throw(DimensionMismatch("The dimensions of AP and BP must be the same"))
     if ismissing(W)
         n = packedside(AP)
         W = Vector{R}(undef, n)
@@ -2142,7 +2246,7 @@ end
         n = length(W)
         chkpacked(n, AP)
         require_one_based_indexing(W)
-        chkstride1(AP, W)
+        chkstride1(W)
     end
     if ismissing(Z)
         Z = Matrix{T}(undef, n, n)
@@ -2172,41 +2276,46 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    return spgvd!(itype, 'V', uplo, n, AP, BP, W, Z, max(1, stride(Z, 2)), work, length(work), rwork, length(rwork), iwork,
-        length(iwork))
+    evs, evecs = spgvd!(itype, 'V', uplo, n, APv, BPv, W, Z, max(1, stride(Z, 2)), work, length(work), rwork, length(rwork),
+        iwork, length(iwork))
+    return evs, evecs, BP
 end
 
-@doc raw"""
-    spgvd!(itype, 'N', uplo, AP::AbstractVector, BP::AbstractVector, W=missing, work=missing[, rwork=missing], iwork=missing)
-        -> W
-    spgvd!(itype, 'V', uplo, AP::AbstractVector, BP::AbstractVector, W=missing, Z=missing, work=missing[, rwork=missing],
-        iwork=missing) -> W, Z
-    spgvd!(itype, 'N', AP::PackedMatrixUnscaled, BP::PackedMatrixUnscaled, W=missing, work=missing[, rwork=missing], iwork=missing)
-        -> W
-    spgvd!(itype, 'V', AP::PackedMatrixUnscaled, BP::PackedMatrixUnscaled, W=missing, Z=missing, work=missing[, rwork=missing],
-        iwork=missing) -> W, Z
+@doc """
+    spgvd!(itype, 'N', uplo, AP::AbstractVector, BP::AbstractVector, W=missing,
+        work=missing[, rwork=missing], iwork=missing) -> W
+    spgvd!(itype, 'N', AP::PackedMatrix, BP::PackedMatrix, W=missing, work=missing
+        [, rwork=missing], iwork=missing) -> W
+    spgvd!(itype, 'V', uplo, AP::AbstractVector, BP::AbstractVector, W=missing, Z=missing,
+        work=missing[, rwork=missing], iwork=missing) -> (W, Z)
+    spgvd!(itype, 'V', AP::PackedMatrix, BP::PackedMatrix, W=missing, Z=missing,
+        work=missing[, rwork=missing], iwork=missing) -> (W, Z)
 
 Finds the generalized eigenvalues (second parameter `'N'`) or eigenvalues and eigenvectors (second parameter `'V'`) of a
 Hermitian matrix ``A`` in packed storage `AP` and Hermitian positive-definite matrix ``B`` in packed storage `BP`.
-If `uplo = U`, `AP` and `BP` are the upper triangles of ``A``, and ``B``, respectively. If `uplo = L`, they are the lower
+If `uplo = 'U'`, `AP` and `BP` are the upper triangles of ``A``, and ``B``, respectively. If `uplo = 'L'`, they are the lower
 triangles.
 
-- If `itype = 1`, the problem to solve is ``A x = \lambda B x``.
-- If `itype = 2`, the problem to solve is ``A B x = \lambda x``.
-- If `itype = 3`, the problem to solve is ``B A x = \lambda x``.
+- If `itype = 1`, the problem to solve is ``A x = \\lambda B x``.
+- If `itype = 2`, the problem to solve is ``A B x = \\lambda x``.
+- If `itype = 3`, the problem to solve is ``B A x = \\lambda x``.
+
+On exit, ``B`` is overwritten with the triangular factor ``U`` or ``L`` from the Cholesky factorization ``B = U' U`` or
+``B = L L'``.
 
 The output vector `W` and matrix `Z`, as well as the temporaries `work`, `rwork` (in the complex case), and `iwork` may be
 specified to save allocations.
 
 If eigenvectors are desired, it uses a divide and conquer algorithm.
+$warnunscale
 """
 spgvd!
 
-@pmalso function hptrd!(uplo::AbstractChar, AP::PM{T}, D::Union{<:AbstractVector{R},Missing}=missing,
+@pmalso :unscale function hptrd!(uplo::AbstractChar, AP::PM{T}, D::Union{<:AbstractVector{R},Missing}=missing,
     E::Union{<:AbstractVector{R},Missing}=missing,
     τ::Union{<:AbstractVector{T},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
-    require_one_based_indexing(AP)
-    chkstride1(AP)
+    require_one_based_indexing(APv)
+    chkstride1(APv)
     if ismissing(D)
         n = packedside(AP)
         D = Vector{R}(undef, n)
@@ -2230,16 +2339,16 @@ spgvd!
         require_one_based_indexing(τ)
         chkstride1(τ)
     end
-    return hptrd!(uplo, n, AP, D, E, τ)
+    return hptrd!(uplo, n, APv, D, E, τ)
 end
 
 """
     hptrd!(uplo, AP::AbstractVector, D=missing, E=missing, τ=missing) -> (A, τ, D, E)
-    hptrd!(AP::PackedMatrixUnscaled, D=missing, E=missing, τ=missing) -> (A, τ, D, E)
+    hptrd!(AP::PackedMatrix, D=missing, E=missing, τ=missing) -> (A, τ, D, E)
 
 `hptrd!` reduces a Hermitian matrix ``A`` stored in packed form `AP` to real-symmetric tridiagonal form ``T`` by an orthogonal
 similarity transformation: ``Q' A Q = T``.
-If `uplo = U`, `AP` is the upper triangle of ``A``, else it is the lower triangle.
+If `uplo = 'U'`, `AP` is the upper triangle of ``A``, else it is the lower triangle.
 
 On exit, if `uplo = 'U'`, the diagonal and first superdiagonal of ``A`` are overwritten by the corresponding elements of the
 tridiagonal matrix ``T``, and the elements above the first superdiagonal, with the array `τ`, represent the orthogonal matrix
@@ -2251,13 +2360,14 @@ represent the orthogonal matrix ``Q`` as a product of elementary reflectors.
 the off-diagonal elements of ``T``.
 
 The output vectors `D`, `E`, and `τ` may be specified to save allocations.
+$warnunscale
 """
 hptrd!
 
 @pmalso function opgtr!(uplo::AbstractChar, AP::PM{T}, τ::AbstractVector{T}, Q::Union{<:AbstractMatrix{T},Missing}=missing,
     work::Union{<:AbstractVector{T},Missing}=missing) where {T<:BlasFloat}
-    require_one_based_indexing(AP, τ)
-    chkstride1(AP, τ)
+    require_one_based_indexing(APv, τ)
+    chkstride1(APv, τ)
     n = length(τ) +1
     chkpacked(n, AP)
     if ismissing(Q)
@@ -2274,7 +2384,7 @@ hptrd!
         require_one_based_indexing(work)
         chkstride1(work)
     end
-    return opgtr!(uplo, n, AP, τ, Q, max(1, stride(Q, 2)), work)
+    return opgtr!(uplo, n, APv, τ, Q, max(1, stride(Q, 2)), work)
 end
 
 """
@@ -2290,8 +2400,8 @@ opgtr!
 
 @pmalso function opmtr!(side::AbstractChar, uplo::AbstractChar, trans::AbstractChar, AP::PM{T}, τ::AbstractVector{T},
     C::AbstractMatrix{T}, work::Union{<:AbstractVector{T},Missing}=missing) where {T<:BlasFloat}
-    require_one_based_indexing(AP, τ, C)
-    chkstride1(AP, τ, C)
+    require_one_based_indexing(APv, τ, C)
+    chkstride1(APv, τ, C)
     m, n = size(C)
     if side == 'L'
         chkpacked(m, AP)
@@ -2314,7 +2424,7 @@ opgtr!
             chkstride1(work)
         end
     end
-    return opmtr!(side, uplo, trans, m, n, AP, τ, C, max(1, stride(C, 2)), work)
+    return opmtr!(side, uplo, trans, m, n, APv, τ, C, max(1, stride(C, 2)), work)
 end
 
 @doc raw"""
@@ -2328,11 +2438,11 @@ end
 | `TRANS = 'N'`                         | ``Q C``      | ``C Q``      |
 | `TRANS = 'T'` or `'C'` (complex case) | ``Q' C``     | ``C Q'``     |
 
-where ``Q`` is a real orthogonal or complex unitary matrix of order ``\mathit{nq}``, with ``\mathit{nq} = m`` if `SIDE = 'L'`
-and ``\mathit{nq} = n`` if `SIDE = 'R'`. ``Q`` is defined as the product of ``\mathit{nq} -1`` elementary reflectors, as
-returned by [`hptrd!`](@ref) using packed storage:
-- if `UPLO = 'U'`, ``Q = H_{\mathit{nq} -1} \dotsm H_2 H_1``;
-- if `UPLO = 'L'`, ``Q = H_1 H_2 \dotsm H_{\mathit{nq} -1}``.
+where ``Q`` is a real orthogonal or complex unitary matrix of order ``n_q``, with ``n_q = m`` if `SIDE = 'L'` and ``n_q = n``
+if `SIDE = 'R'`. ``Q`` is defined as the product of ``n_q -1`` elementary reflectors, as returned by [`hptrd!`](@ref) using
+packed storage:
+- if `UPLO = 'U'`, ``Q = H_{n_q -1} \dotsm H_2 H_1``;
+- if `UPLO = 'L'`, ``Q = H_1 H_2 \dotsm H_{n_q -1}``.
 
 The temporary `work` may be specified to save allocations.
 """
