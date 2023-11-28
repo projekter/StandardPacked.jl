@@ -170,10 +170,11 @@ function LinearAlgebra.cholesky!(P::PackedMatrix{T}, ::NoPivot=NoPivot(); shift:
     end
     C, info = pptrf!(P)
     check && LinearAlgebra.checkpositivedefinite(info)
-    return Cholesky(PackedMatrix(P.dim, C, packed_isupper(P) ? :U : :L), packed_ulchar(P), info)
+    return Cholesky(PackedMatrix(P.dim, C.data, packed_isupper(P) ? :U : :L), packed_ulchar(P), info)
 end
 
-LinearAlgebra.inv!(C::Cholesky{<:BlasFloat,<:PackedMatrix}) = LAPACK.pptri!(C.factors)
+LinearAlgebra.inv!(C::Cholesky{<:BlasFloat,<:PackedMatrix}) = pptri!(C.factors)
+LinearAlgebra.inv(C::Cholesky{<:BlasFloat,<:PackedMatrix}) = pptri!(copy(C.factors))
 
 
 """
@@ -201,9 +202,9 @@ The same as [`bunchkaufman`](@ref), but saves space by overwriting the input `P`
 """
 function LinearAlgebra.bunchkaufman!(P::PackedMatrix{R}, ipiv::Union{AbstractVector{BlasInt},Missing}=missing;
     check::Bool=true) where {R<:BlasFloat}
-    LD, ipiv, info = R isa BlasReal ? sptrf!(P, ipiv) : hptrf!(P, ipiv)
+    LD, ipiv, info = R <: BlasReal ? sptrf!(P, ipiv) : hptrf!(P, ipiv)
     check && LinearAlgebra.checknonsingular(info)
-    return BunchKaufman(LD, ipiv, packed_ulchar(P), R isa BlasReal, false, info)
+    return BunchKaufman(LD, ipiv, packed_ulchar(P), R <: BlasReal, false, info)
 end
 
 LinearAlgebra.inv!(B::BunchKaufman{T,<:PackedMatrix}, work::Union{<:AbstractVector{T},Missing}=missing) where {T<:BlasReal} =
@@ -616,6 +617,6 @@ The argument `P` should not be a matrix. Rather, instead of matrices it should b
 expensive and typically allocates memory (although it can also be done in-place via, e.g., [`cholesky!`](@ref)), and
 performance-critical situations requiring `ldiv!` usually also require fine-grained control over the factorization of `P`.
 """
-LinearAlgebra.ldiv!(C::Cholesky{T,<:PackedMatrix}, B::StridedVecOrMat{T}) where {T<:BlasFloat} = LAPACK.pptrs!(C.factors, B)
+LinearAlgebra.ldiv!(C::Cholesky{T,<:PackedMatrix}, B::StridedVecOrMat{T}) where {T<:BlasFloat} = pptrs!(C.factors, B)
 LinearAlgebra.ldiv!(B::BunchKaufman{T,<:PackedMatrix}, R::StridedVecOrMat{T}) where {T<:BlasReal} = sptrs!(B.LD, B.ipiv, R)
 LinearAlgebra.ldiv!(B::BunchKaufman{T,<:PackedMatrix}, R::StridedVecOrMat{T}) where {T<:BlasComplex} = hptrs!(B.LD, B.ipiv, R)

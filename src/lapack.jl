@@ -80,8 +80,8 @@ macro doublefun(name, arg)
     hname = Symbol("h", name)
     hfun = Symbol(hname, "!")
     esc(quote
-        for (f, blasf) in (($(QuoteNode(sfun)), @blasfunc($sname)),
-                           (isnothing($hname) ? () : (($(QuoteNode(hfun)), @blasfunc($hname)),))...)
+        for (f, blasf) in (($(QuoteNode(sfun)), $sname),
+                           (isnothing($hname) ? () : (($(QuoteNode(hfun)), $hname),))...)
             @eval $arg
         end
     end)
@@ -267,7 +267,7 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
                 uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, info::Ref{BlasInt}, 1::Clong
             )
             chkargsok(info[])
-            checknonsingular(info[])
+            chknonsingular(info[])
             return AP
         end
     end
@@ -665,7 +665,7 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
                 uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, D::Ptr{$(_realtype(elty))}, E::Ptr{$(_realtype(elty))},
                 τ::Ptr{$elty}, info::Ref{BlasInt}, 1::Clong
             )
-            chklapackerror(info)
+            chklapackerror(info[])
             return AP, τ, D, E
         end
 
@@ -838,7 +838,8 @@ else
             throw(DimensionMismatch(lazy"Packed symmetric matrix A has size smaller than length(x) = $(N)."))
         chkstride1(APv)
         px, stx = vec_pointer_stride(x, ArgumentError("input vector with 0 stride is not allowed"))
-        return GC.@preserve x spr!(uplo, N, T(α), px, stx , APv)
+        GC.@preserve x spr!(uplo, N, T(α), px, stx , APv)
+        return AP
     end
 
 """
@@ -869,7 +870,8 @@ end
         throw(DimensionMismatch(lazy"Packed symmetric matrix A has size smaller than length(x) = $(N)."))
     chkstride1(APv)
     px, stx = vec_pointer_stride(x, ArgumentError("input vector with 0 stride is not allowed"))
-    return GC.@preserve x hpr!(uplo, N, T(α), px, stx, APv)
+    GC.@preserve x hpr!(uplo, N, T(α), px, stx, APv)
+    return AP
 end
 
 """
@@ -908,7 +910,8 @@ result matrix.
     require_one_based_indexing(APv, A)
     n = checksquare(A)
     chkpacked(n, AP)
-    return trttp(uplo, n, A, max(1, stride(A, 2)), APv)
+    trttp!(uplo, n, A, max(1, stride(A, 2)), APv)
+    return AP
 end
 
 @pmalso function trttp!(uplo::AbstractChar, A::AbstractMatrix{T}, AP::PM{T}) where {T}
@@ -984,7 +987,8 @@ tpttr!
 @pmalso :unscale function pptrf!(uplo::AbstractChar, AP::PM{<:BlasFloat})
     require_one_based_indexing(APv)
     chkstride1(APv)
-    return pptrf!(uplo, packedside(AP), APv)
+    _, info = pptrf!(uplo, packedside(AP), APv)
+    return AP, info
 end
 
 """
@@ -1026,7 +1030,8 @@ pptrs!
 @pmalso function pptri!(uplo::AbstractChar, AP::PM{<:BlasFloat})
     require_one_based_indexing(APv)
     chkstride1(APv)
-    return pptri!(uplo, packedside(AP), APv)
+    pptri!(uplo, packedside(AP), APv)
+    return AP
 end
 
 """
@@ -1052,7 +1057,8 @@ pptri!
             require_one_based_indexing(ipiv)
             chkstride1(ipiv)
         end
-        return $f(uplo, n, size(B, 2), APv, ipiv, B, max(1, stride(B, 2)))
+        $f(uplo, n, size(B, 2), APv, ipiv, B, max(1, stride(B, 2)))
+        return B, AP, ipiv
     end
     @pmalso :unscale function $f(uplo::AbstractChar, AP::PM{T}, B::AbstractVecOrMat{T}) where {T<:$T}
         return $f(uplo, AP, missing, B)
@@ -1076,7 +1082,7 @@ $($warnunscale)
 end
 
 @doubledoc ptrf begin
-    @pmalso :unscale function $f(uplo::AbstractChar, AP::PM{$T}, ipiv::Union{<:AbstractVector{BlasInt},Missing}=missing)
+    @pmalso :unscale function $f(uplo::AbstractChar, AP::PM{<:$T}, ipiv::Union{<:AbstractVector{BlasInt},Missing}=missing)
         require_one_based_indexing(APv)
         chkstride1(APv)
         n = packedside(AP)
@@ -1087,7 +1093,8 @@ end
             require_one_based_indexing(ipiv)
             chkstride1(ipiv)
         end
-        return $f(uplo, n, APv, ipiv)
+        _, _, info = $f(uplo, n, APv, ipiv)
+        return AP, ipiv, info
     end
 
 """
@@ -1113,7 +1120,7 @@ end
         n = length(ipiv)
         chkpacked(n, AP)
         size(B, 1) == n || throw(DimensionMismatch("B has first dimension $(size(B, 1)), but needs $n"))
-        return $f(uplo, n, size(B, 2), AP, ipiv, B, max(1, stride(B, 2)))
+        return $f(uplo, n, size(B, 2), APv, ipiv, B, max(1, stride(B, 2)))
     end
 
 """
@@ -1140,7 +1147,8 @@ end
             require_one_based_indexing(work)
             chkstride1(work)
         end
-        return $f(uplo, n, APv, ipiv, work)
+        $f(uplo, n, APv, ipiv, work)
+        return AP
     end
 
 """
@@ -2381,7 +2389,8 @@ spgvd!
         require_one_based_indexing(τ)
         chkstride1(τ)
     end
-    return hptrd!(uplo, n, APv, D, E, τ)
+    hptrd!(uplo, n, APv, D, E, τ)
+    return AP, τ, D, E
 end
 
 """

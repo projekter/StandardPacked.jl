@@ -130,7 +130,7 @@ Left-multiplies all diagonal entries in `P` by `factor`. Returns `P`.
 
 See also [`rmul_diags!`](@ref), [`rmul_offdiags!`](@ref), [`lmul_offdiags!`](@ref).
 """
-function lmul_diags!(P::PackedMatrix{R}, factor::R) where {R}
+function lmul_diags!(factor::R, P::PackedMatrix{R}) where {R}
     data = P.data
     for i in PackedDiagonalIterator(P)
         @inbounds data[i] = factor * data[i]
@@ -144,11 +144,11 @@ Left-multiplies all diagonal entries in `P` by `factor`. Returns `P`.
 
 See also [`rmul_diags!`](@ref), [`rmul_offdiags!`](@ref), [`lmul_diags!`](@ref).
 """
-function lmul_offdiags!(P::PackedMatrix{R}, factor::R) where {R}
+function lmul_offdiags!(factor::R, P::PackedMatrix{R}) where {R}
     diags = PackedDiagonalIterator(P)
     data = P.data
     for (d₁, d₂) in zip(diags, Iterators.drop(diags, 1))
-        @inbounds lmul!(@view(data[d₁+1:d₂-1]), factor)
+        @inbounds lmul!(factor, @view(data[d₁+1:d₂-1]))
     end
     return P
 end
