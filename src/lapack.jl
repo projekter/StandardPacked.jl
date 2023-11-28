@@ -738,8 +738,11 @@ macro pmalso(scaled, fun=nothing)
     # - one where we replace all PM{T} by PM and add where {PM<:AbstractVector{T}}
     # - one where we remove the uplo parameter, and introduce the uplo variable
     #   if scaled === :disallow: replace all PM{T} by PM and add where {PM<:PackedMatrixUnscaled{T}}
-    #   if scaled === :unscale: replace all PM{T} by PM and add where {PM<:PackedMatrix{T}}, add packed_unscale!
-    #   if scaled === :diagscale: same, but add PM <: PackedMatrixScaled && rmul_diags!(, scalefac) instead
+    #   if scaled === :unscale: replace all PM{T} by PM and add where {PM<:PackedMatrix{T}}. Method should do packed_unscale!
+    #                           somewhere
+    #   if scaled === :diagscale: replace all PM{T} by PM, add where {PM<:PackedMatrix{T}}, and set the variable
+    #                             scalefac = sqrt(T(2)) if appropriate. Method should do
+    #                             PM <: PackedMatrixScaled && rmul_diags!(, scalefac) somewhere
     #   if scaled === :ignore, just allow all packed matrices without anything to add
     # In all functions, we also add the variables ...v for the vec() of the packed matrices (or the objects themselves).
     @assert(fun.head === :function && fun.args[2].head === :block)
@@ -754,9 +757,6 @@ macro pmalso(scaled, fun=nothing)
     end
     @assert(fncall.head === :call)
     commontype = nothing # this will hold the name of our generic type, most likely :T
-    if scaled ∈ (:unscale, :diagscale)
-        unscalecalls = Any[]
-    end
     for i in length(fncall.args):-1:2
         arg = fncall.args[i]
         if arg.head === :(::)
@@ -781,11 +781,6 @@ macro pmalso(scaled, fun=nothing)
             end
             pushfirst!(fun.args[2].args, :($(Symbol(name, "v")) = $name))
             pushfirst!(fun2.args[2].args, :($(Symbol(name, "v")) = vec($name)))
-            if scaled === :unscale
-                push!(unscalecalls, :($name = packed_unscale!($name)))
-            elseif scaled === :diagscale
-                push!(unscalecalls, :(rmul_diags!($name, scalefac)))
-            end
         elseif arg === :uplo # doesn't happen as upload is always qualified with AbstractChar, but anyway...
             deleteat!(fncall2.args, i)
         end
@@ -797,13 +792,10 @@ macro pmalso(scaled, fun=nothing)
     fncall2parent.args[1] = Expr(:where, fncall2, isnothing(commontype) ? :(PM<:$supertype) :
                                                                           :(PM<:$supertype{$commontype}))
     # in the second function definition, make the variable uplo available
-    if scaled === :unscale
-        prepend!(fun2.args[2].args, unscalecalls)
-    elseif scaled === :diagscale
+    if scaled === :diagscale
         pushfirst!(fun2.args[2].args, :(
             if PM <: PackedMatrixScaled
                 scalefac = sqrt($(isnothing(commontype) ? :2 : :(_realtype($commontype)(2))))
-                $(unscalecalls...)
             end
         ))
     end
@@ -854,6 +846,7 @@ else
             throw(DimensionMismatch(lazy"Packed symmetric matrix A has size smaller than length(x) = $(N)."))
         chkstride1(APv)
         px, stx = vec_pointer_stride(x, ArgumentError("input vector with 0 stride is not allowed"))
+        PM <: PackedMatrixScaled && (AP = packed_unscale!(AP))
         GC.@preserve x spr!(uplo, N, T(α), px, stx , APv)
         return AP
     end
@@ -886,6 +879,7 @@ end
         throw(DimensionMismatch(lazy"Packed symmetric matrix A has size smaller than length(x) = $(N)."))
     chkstride1(APv)
     px, stx = vec_pointer_stride(x, ArgumentError("input vector with 0 stride is not allowed"))
+    PM <: PackedMatrixScaled && (AP = packed_unscale!(AP))
     GC.@preserve x hpr!(uplo, N, T(α), px, stx, APv)
     return AP
 end
@@ -1003,6 +997,7 @@ tpttr!
 @pmalso :unscale function pptrf!(uplo::AbstractChar, AP::PM{<:BlasFloat})
     require_one_based_indexing(APv)
     chkstride1(APv)
+    PM <: PackedMatrixScaled && (AP = packed_unscale!(AP))
     _, info = pptrf!(uplo, packedside(AP), APv)
     return AP, info
 end
@@ -1073,6 +1068,7 @@ pptri!
             require_one_based_indexing(ipiv)
             chkstride1(ipiv)
         end
+        PM <: PackedMatrixScaled && (AP = packed_unscale!(AP))
         $f(uplo, n, size(B, 2), APv, ipiv, B, max(1, stride(B, 2)))
         return B, AP, ipiv
     end
@@ -1109,6 +1105,7 @@ end
             require_one_based_indexing(ipiv)
             chkstride1(ipiv)
         end
+        PM <: PackedMatrixScaled && (AP = packed_unscale!(AP))
         _, _, info = $f(uplo, n, APv, ipiv)
         return AP, ipiv, info
     end
@@ -1199,6 +1196,7 @@ spev!(jobz::AbstractChar, args...) = spev!(Val(Symbol(jobz)), args...)
         require_one_based_indexing(work)
         chkstride1(work)
     end
+    PM <: PackedMatrixScaled && rmul_diags!(AP, scalefac)
     evs, _ = spev!('N', uplo, n, APv, W, Ptr{T}(C_NULL), 1, work)
     return PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs
 end
@@ -1230,6 +1228,7 @@ end
         require_one_based_indexing(work)
         chkstride1(work)
     end
+    PM <: PackedMatrixScaled && rmul_diags!(AP, scalefac)
     evs, evecs = spev!('V', uplo, n, APv, W, Z, max(1, stride(Z, 2)), work)
     return (PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs), evecs
 end
@@ -1262,6 +1261,7 @@ end
         require_one_based_indexing(rwork)
         chkstride1(rwork)
     end
+    PM <: PackedMatrixScaled && rmul_diags!(AP, scalefac)
     evs, _ = spev!('N', uplo, n, APv, W, Ptr{T}(C_NULL), 1, work, rwork)
     return PM <: PackedMatrixScaled && rmul!(evs, inv(scalefac)) : evs
 end
@@ -1301,6 +1301,7 @@ end
         require_one_based_indexing(rwork)
         chkstride1(rwork)
     end
+    PM <: PackedMatrixScaled && rmul_diags!(AP, scalefac)
     evs, evecs = spev!('V', uplo, n, APv, W, Z, max(1, stride(Z, 2)), work, rwork)
     return (PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs), evecs
 end
@@ -1360,8 +1361,11 @@ spevx!(jobz::Val, uplo::AbstractChar, AP::Union{<:AbstractVector,<:PackedMatrix}
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    PM <: PackedMatrixScaled && !isnothing(vl) && (vl *= scalefac)
-    PM <: PackedMatrixScaled && !isnothing(vu) && (vu *= scalefac)
+    if PM <: PackedMatrixScaled
+        rmul_diags!(AP, scalefac)
+        !isnothing(vl) && (vl *= scalefac)
+        !isnothing(vu) && (vu *= scalefac)
+    end
     m, _, _, _, _ = spevx!('N', range, uplo, n, APv, vl, vu, il, iu, abstol, W, Ptr{T}(C_NULL), 1, work, iwork,
         Ptr{BlasInt}(C_NULL))
     return PM <: PackedMatrixScaled ? rmul!(@view(W[1:m]), inv(scalefac)) : @view(W[1:m])
@@ -1423,8 +1427,11 @@ end
         require_one_based_indexing(ifail)
         chkstride1(ifail)
     end
-    PM <: PackedMatrixScaled && !isnothing(vl) && (vl *= scalefac)
-    PM <: PackedMatrixScaled && !isnothing(vu) && (vu *= scalefac)
+    if PM <: PackedMatrixScaled
+        rmul_diags!(AP, scalefac)
+        !isnothing(vl) && (vl *= scalefac)
+        !isnothing(vu) && (vu *= scalefac)
+    end
     m, _, _, info, _ = spevx!('V', range, uplo, n, APv, vl, vu, il, iu, abstol, W, Z, max(1, stride(Z, 2)), work, iwork, ifail)
     return (PM <: PackedMatrixScaled ? rmul!(@view(W[1:m]), inv(scalefac)) : @view(W[1:m])),
         @view(Z[:, 1:m]), info, @view(ifail[1:m])
@@ -1472,8 +1479,11 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    PM <: PackedMatrixScaled && !isnothing(vl) && (vl *= scalefac)
-    PM <: PackedMatrixScaled && !isnothing(vu) && (vu *= scalefac)
+    if PM <: PackedMatrixScaled
+        rmul_diags!(AP, scalefac)
+        !isnothing(vl) && (vl *= scalefac)
+        !isnothing(vu) && (vu *= scalefac)
+    end
     m, _, _, _, _, = spevx!('N', range, uplo, n, APv, vl, vu, il, iu, abstol, W, Ptr{T}(C_NULL), 1, work, rwork, iwork,
         Ptr{BlasInt}(C_NULL))
     return PM <: PackedMatrixScaled ? rmul!(@view(W[1:m]), inv(scalefac)) : @view(W[1:m])
@@ -1542,8 +1552,11 @@ end
         require_one_based_indexing(ifail)
         chkstride1(ifail)
     end
-    PM <: PackedMatrixScaled && !isnothing(vl) && (vl *= scalefac)
-    PM <: PackedMatrixScaled && !isnothing(vu) && (vu *= scalefac)
+    if PM <: PackedMatrixScaled
+        rmul_diags!(AP, scalefac)
+        !isnothing(vl) && (vl *= scalefac)
+        !isnothing(vu) && (vu *= scalefac)
+    end
     m, _, _, info, _ = spevx!('V', range, uplo, n, APv, vl, vu, il, iu, abstol, W, Z, max(1, stride(Z, 2)), work, rwork, iwork,
         ifail)
     return (PM <: PackedMatrixScaled ? rmul!(@view(W[1:m]), inv(scalefac)) : @view(W[1:m])),
@@ -1607,6 +1620,7 @@ spevd!(jobz::AbstractChar, args...) = spevd!(Val(Symbol(jobz)), args...)
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
+    PM <: PackedMatrixScaled && rmul_diags!(AP, scalefac)
     evs, _ = spevd!('N', uplo, n, APv, W, Ptr{T}(C_NULL), 1, work, length(work), iwork, length(iwork))
     return PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs
 end
@@ -1646,6 +1660,7 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
+    PM <: PackedMatrixScaled && rmul_diags!(AP, scalefac)
     evs, evecs = spevd!('V', uplo, n, APv, W, Z, max(1, stride(Z, 2)), work, length(work), iwork, length(iwork))
     return (PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs), evecs
 end
@@ -1685,6 +1700,7 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
+    PM <: PackedMatrixScaled && rmul_diags!(AP, scalefac)
     evs, _ = spevd!('N', uplo, n, APv, W, Ptr{T}(C_NULL), 1, work, length(work), rwork, length(rwork), iwork, length(iwork))
     return PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs
 end
@@ -1732,6 +1748,7 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
+    PM <: PackedMatrixScaled && rmul_diags!(AP, scalefac)
     evs, evecs = spevd!('V', uplo, n, APv, W, Z, max(1, stride(Z, 2)), work, length(work), rwork, length(rwork), iwork,
         length(iwork))
     return (PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs), evecs
@@ -1781,6 +1798,10 @@ spgv!(itype::Integer, jobz::AbstractChar, args...) = spgv!(itype, Val(Symbol(job
         require_one_based_indexing(work)
         chkstride1(work)
     end
+    if PM <: PackedMatrixScaled
+        AP = packed_unscale!(AP)
+        BP = packed_unscale!(BP)
+    end
     evs, _ = spgv!(itype, 'N', uplo, n, APv, BPv, W, Ptr{T}(C_NULL), 1, work)
     return evs, BP
 end
@@ -1814,6 +1835,10 @@ end
         require_one_based_indexing(work)
         chkstride1(work)
     end
+    if PM <: PackedMatrixScaled
+        AP = packed_unscale!(AP)
+        BP = packed_unscale!(BP)
+    end
     evs, evecs = spgv!(itype, 'V', uplo, n, APv, BPv, W, Z, max(1, stride(Z, 2)), work)
     return evs, evecs, BP
 end
@@ -1846,6 +1871,10 @@ end
         length(rwork) < max(1, 3n -2) && throw(ArgumentError("The provided rwork space was too small"))
         require_one_based_indexing(rwork)
         chkstride1(rwork)
+    end
+    if PM <: PackedMatrixScaled
+        AP = packed_unscale!(AP)
+        BP = packed_unscale!(BP)
     end
     evs, _ = spgv!(itype, 'N', uplo, n, APv, BPv, W, Ptr{T}(C_NULL), 1, work, rwork)
     return evs, BP
@@ -1887,6 +1916,10 @@ end
         length(rwork) < max(1, 3n -2) && throw(ArgumentError("The provided rwork space was too small"))
         require_one_based_indexing(rwork)
         chkstride1(rwork)
+    end
+    if PM <: PackedMatrixScaled
+        AP = packed_unscale!(AP)
+        BP = packed_unscale!(BP)
     end
     evs, evecs = spgv!(itype, 'V', uplo, n, APv, BPv, W, Z, max(1, stride(Z, 2)), work, rwork)
     return evs, evecs, BP
@@ -1960,6 +1993,10 @@ spgvx!(itype::Integer, jobz::Val, uplo::AbstractChar, AP::PM, BP::PM) where {PM<
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
+    if PM <: PackedMatrixScaled
+        AP = packed_unscale!(AP)
+        BP = packed_unscale!(BP)
+    end
     m, _, _, _, _ = spgvx!(itype, 'N', range, uplo, n, APv, BPv, vl, vu, il, iu, abstol, W, Ptr{T}(C_NULL), 1, work, iwork,
         Ptr{BlasInt}(C_NULL))
     return @view(W[1:m]), BP
@@ -2021,6 +2058,10 @@ end
         require_one_based_indexing(ifail)
         chkstride1(ifail)
     end
+    if PM <: PackedMatrixScaled
+        AP = packed_unscale!(AP)
+        BP = packed_unscale!(BP)
+    end
     m, _, _, info, _ = spgvx!(itype, 'V', range, uplo, n, APv, BPv, vl, vu, il, iu, abstol, W, Z, max(1, stride(Z, 2)), work,
         iwork, ifail)
     return @view(W[1:m]), @view(Z[:, 1:m]), info, @view(ifail[1:m]), BP
@@ -2068,6 +2109,10 @@ end
         length(iwork) < 5n && throw(ArgumentError("The provided iwork space was too small"))
         require_one_based_indexing(iwork)
         chkstride1(iwork)
+    end
+    if PM <: PackedMatrixScaled
+        AP = packed_unscale!(AP)
+        BP = packed_unscale!(BP)
     end
     m, _, _, _, _ = spgvx!(itype, 'N', range, uplo, n, APv, BPv, vl, vu, il, iu, abstol, W, Ptr{T}(C_NULL), 1, work, rwork,
         iwork, Ptr{BlasInt}(C_NULL))
@@ -2137,6 +2182,10 @@ end
         length(ifail) < n && throw(DimensionMismatch("The provided ifail space was too small"))
         require_one_based_indexing(ifail)
         chkstride1(ifail)
+    end
+    if PM <: PackedMatrixScaled
+        AP = packed_unscale!(AP)
+        BP = packed_unscale!(BP)
     end
     m, _, _, info, _ = spgvx!(itype, 'V', range, uplo, n, APv, BPv, vl, vu, il, iu, abstol, W, Z, max(1, stride(Z, 2)), work,
         rwork, iwork, ifail)
@@ -2211,6 +2260,10 @@ spgvd!(itype::Integer, jobz::AbstractChar, args...) = spgvd!(itype, Val(Symbol(j
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
+    if PM <: PackedMatrixScaled
+        AP = packed_unscale!(AP)
+        BP = packed_unscale!(BP)
+    end
     evs, _ = spgvd!(itype, 'N', uplo, n, APv, BPv, W, Ptr{T}(C_NULL), 1, work, length(work), iwork, length(iwork))
     return evs, BP
 end
@@ -2252,6 +2305,10 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
+    if PM <: PackedMatrixScaled
+        AP = packed_unscale!(AP)
+        BP = packed_unscale!(BP)
+    end
     evs, evecs = spgvd!(itype, 'V', uplo, n, APv, BPv, W, Z, max(1, stride(Z, 2)), work, length(work), iwork, length(iwork))
     return evs, evecs, BP
 end
@@ -2292,6 +2349,10 @@ end
         length(iwork) < 1 && throw(ArgumentError("The provided iwork space was too small"))
         require_one_based_indexing(iwork)
         chkstride1(iwork)
+    end
+    if PM <: PackedMatrixScaled
+        AP = packed_unscale!(AP)
+        BP = packed_unscale!(BP)
     end
     evs, _ = spgvd!(itype, 'N', uplo, n, APv, BPv, W, Ptr{T}(C_NULL), 1, work, length(work), rwork, length(rwork), iwork,
         length(iwork))
@@ -2341,6 +2402,10 @@ end
         length(iwork) < 3 + 5n && throw(ArgumentError("The provided iwork space was too small"))
         require_one_based_indexing(iwork)
         chkstride1(iwork)
+    end
+    if PM <: PackedMatrixScaled
+        AP = packed_unscale!(AP)
+        BP = packed_unscale!(BP)
     end
     evs, evecs = spgvd!(itype, 'V', uplo, n, APv, BPv, W, Z, max(1, stride(Z, 2)), work, length(work), rwork, length(rwork),
         iwork, length(iwork))
@@ -2405,6 +2470,7 @@ spgvd!
         require_one_based_indexing(τ)
         chkstride1(τ)
     end
+    PM <: PackedMatrixScaled && (AP = packed_unscale!(AP))
     hptrd!(uplo, n, APv, D, E, τ)
     return AP, τ, D, E
 end
