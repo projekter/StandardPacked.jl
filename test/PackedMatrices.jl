@@ -12,6 +12,7 @@ setprecision(8)
         0.15025179696269242 0.41116243025455734 0.35352758268808504 0.40253776414772224 0.7741030577273389 0.33109536531255035 0.27758928139887895
         0.9847133877489483 0.5343466059451054 0.644850818020348 0.2036884435817956 0.33109536531255035 0.14756643458657948 0.09214560319184117
         0.3610824315069938 0.43066682904413156 0.8100978477428766 0.26796888784023765 0.27758928139887895 0.09214560319184117 0.45340576959493983]
+    @test packedsize(refmatrix) == 28
     @testset "Upper unscaled" begin
         data = elty[0.9555114416827896,0.14061115800771273,0.5391622763612515,0.660907232019832,0.21722146893315186,
             0.0019306390378336369,0.7388163447790721,0.8336423569126538,0.22609164615603128,0.5535820925972024,
@@ -21,20 +22,25 @@ setprecision(8)
             0.27758928139887895,0.09214560319184117,0.45340576959493983]
         pm = PackedMatrix(7, data)
         @test size(pm) == (7, 7)
-        @test LinearAlgebra.checksquare(pm) == 7
+        @test LinearAlgebra.checksquare(pm) == packedside(pm) == packedside(vec(pm)) == 7
         @test eltype(pm) === elty
         @test packed_isupper(pm)
         @test !packed_islower(pm)
         @test !packed_isscaled(pm)
+        @test issymmetric(pm)
+        @test ishermitian(pm)
+        @test transpose(pm) == pm
 
         @test collect(pm) == data
         @test [x for x in pm] == data
         @test Matrix(pm) == refmatrix
+        @test PackedMatrix(Symmetric(refmatrix)) == pm
         @test [pm[i, j] for i in 1:7, j in 1:7] == refmatrix
         for i in 1:7, j in 1:7
             pm[i, j] = refmatrix[i, j]
         end
         @test Matrix(pm) == refmatrix
+        @test_throws ErrorException PackedMatrix(pm, :L)
         @test diag(pm) == diag(refmatrix)
         @test tr(pm) == tr(refmatrix)
 
@@ -99,8 +105,9 @@ setprecision(8)
             @test norm(pmcs, 3.) ≈ 12.632719195312756 rtol=2eps(elty)
         end
 
+        pmc .= pm
+        @test pmc == pm
         if elty ∈ (Float32, Float64) # we need LAPACK support for these tests
-            copyto!(pmc, pm)
             es = eigen!(pmc)
             @test es.values ≈ elty[-0.9942609100484255,-0.6811215090551395,0.005159417098787866,0.40031013318133934,
                 0.5934629480373085,0.952760032261558,3.1489516001124938]
@@ -115,7 +122,7 @@ setprecision(8)
             end
             @test eigvals(pm) ≈ es.values
             @test vec(pm) == data
-            pm2 = copy(pm)
+            pm2 = PackedMatrix(pm)
             es2 = eigen!(pm2, elty(-.7), elty(1.))
             @test es2.values ≈ @view(es.values[2:6])
             for (checkvec, refvec) in zip(eachcol(es2.vectors), eachcol(@view(es.vectors[:, 2:6])))
@@ -136,16 +143,37 @@ setprecision(8)
 
             copyto!(pmc, pm)
             @test !LinearAlgebra.isposdef(pmc)
-            @test_throws PosDefException cholesky!(pmc)
-            copyto!(pmc, pm)
+            @test_throws PosDefException cholesky(pmc)
+            @test pmc == pm
             @test LinearAlgebra.isposdef(pmc, one(elty))
-            @test cholesky!(pmc, shift=one(elty)).U ≈ elty[1.3983960246234932 0.10055174323423234 0.4726180712633075 0.5283312679453536 0.10744581242866912 0.7041734747594656 0.25821185497449645
+            chol = cholesky!(pmc, shift=one(elty))
+            @test chol.U ≈ elty[1.3983960246234932 0.10055174323423234 0.4726180712633075 0.5283312679453536 0.10744581242866912 0.7041734747594656 0.25821185497449645
                 0. 1.2365482696982792 0.13723596736343546 0.6312068408830044 0.32377107818793416 0.37486667271940743 0.3272845766073084
                 0. 0. 0.8716243956057028 -0.12646679080935472 0.29635897553532703 0.298982588596196 0.737871778986569
                 0. 0. 0. 0.9273792313575595 0.19289178031430956 -0.3959064949144887 0.019710925942854545
                 0. 0. 0. 0. 1.2380205421376222 0.09840290872367227 -0.06348584599245834
                 0. 0. 0. 0. 0. 0.5053369729908973 -0.8290079246701668
                 0. 0. 0. 0. 0. 0. 0.20854097637370994]
+            @test inv(chol) ≈ PackedMatrix(7, elty[15.493628236589293, 18.055791818905497, 22.83884746037381,
+                22.56819523083977, 28.380477703283688, 39.43723994306926, -13.664618497320284, -16.691276904083473,
+                -20.71296414574622, 13.085254087036088, 1.6509049892926726, 1.8105792940720054, 2.1679624382488236,
+                -1.5390396304367675, 0.8211060409222076, -31.02109455183003, -37.87395046635378, -49.32438789295014,
+                27.97393922067559, -3.29559139381791, 65.7991061056096, -17.607661895505345, -21.93913378183722,
+                -29.465880029842584, 15.993513682029798, -1.819156241457544, 37.72200796466474, 22.99414125333774]) rtol=100eps(elty)
+            rhs = elty[1.0 8.0; 2.0 9.0; 3.0 10.0; 4.0 11.0; 5.0 12.0; 6.0 13.0; 7.0 14.0]
+            @test rhs ≈ (pm + I) * (chol \ rhs)
+
+            bk = bunchkaufman(pm)
+            let P=bk.P, U=bk.U, D=bk.D
+                @test P' * U * D * U' * P ≈ Matrix(pm)
+            end
+            @test inv(bk) ≈ PackedMatrix(7, elty[11.676181149869125, -25.74304267079464, 55.837437314564454,
+                -3.890135969716243, 9.077199222177283, 1.0285759205945262, 24.102856515354063, -51.37534555845253,
+                -9.226894089251159,  49.46819607136643, 9.176107458680693, -21.095279400248227, -3.294216491388214,
+                19.103438949417768, 9.400381615980521, -26.29273501144287, 59.09033629509751, 9.912693866880879,
+                -55.950010085611865, -21.636130300323575, 62.79650629970832, 7.584280750861903, -17.484312579760637,
+                -1.9062117598362571, 16.528078653765096, 5.966940819148872, -19.347475787322477, 6.689363759583235])
+            @test rhs ≈ pm * (bk \ rhs)
         end
     end
     @testset "Lower unscaled" begin
@@ -157,20 +185,25 @@ setprecision(8)
             0.09214560319184117,0.45340576959493983]
         pm = PackedMatrix(7, data, :L)
         @test size(pm) == (7, 7)
-        @test LinearAlgebra.checksquare(pm) == 7
+        @test LinearAlgebra.checksquare(pm) == packedside(pm) == packedside(vec(pm)) == 7
         @test eltype(pm) === elty
         @test !packed_isupper(pm)
         @test packed_islower(pm)
         @test !packed_isscaled(pm)
+        @test issymmetric(pm)
+        @test ishermitian(pm)
+        @test transpose(pm) == pm
 
         @test collect(pm) == data
         @test [x for x in pm] == data
         @test Matrix(pm) == refmatrix
+        @test PackedMatrix(Symmetric(refmatrix, :L)) == pm
         @test [pm[i, j] for i in 1:7, j in 1:7] == refmatrix
         for i in 1:7, j in 1:7
             pm[i, j] = refmatrix[i, j]
         end
         @test Matrix(pm) == refmatrix
+        @test_throws ErrorException PackedMatrix(pm, :U)
         @test diag(pm) == diag(refmatrix)
         @test tr(pm) == tr(refmatrix)
 
@@ -235,8 +268,9 @@ setprecision(8)
             @test norm(pmcs, 3.) ≈ 12.632719195312756 rtol=2eps(elty)
         end
 
+        pmc .= pm
+        @test pmc == pm
         if elty ∈ (Float32, Float64) # we need LAPACK support for these tests
-            copyto!(pmc, pm)
             es = eigen!(pmc)
             @test es.values ≈ elty[-0.9942609100484255,-0.6811215090551395,0.005159417098787866,0.40031013318133934,
                 0.5934629480373085,0.952760032261558,3.1489516001124938]
@@ -251,7 +285,7 @@ setprecision(8)
             end
             @test eigvals(pm) ≈ es.values
             @test vec(pm) == data
-            pm2 = copy(pm)
+            pm2 = PackedMatrix(pm)
             es2 = eigen!(pm2, elty(-.7), elty(1.))
             @test es2.values ≈ @view(es.values[2:6])
             for (checkvec, refvec) in zip(eachcol(es2.vectors), eachcol(@view(es.vectors[:, 2:6])))
@@ -272,16 +306,37 @@ setprecision(8)
 
             copyto!(pmc, pm)
             @test !LinearAlgebra.isposdef(pmc)
-            @test_throws PosDefException cholesky!(pmc)
-            copyto!(pmc, pm)
+            @test_throws PosDefException cholesky(pmc)
+            @test pmc == pm
             @test LinearAlgebra.isposdef(pmc, one(elty))
-            @test cholesky!(pmc, shift=one(elty)).U ≈ elty[1.3983960246234932 0.10055174323423234 0.4726180712633075 0.5283312679453536 0.10744581242866912 0.7041734747594656 0.25821185497449645
+            chol = cholesky!(pmc, shift=one(elty))
+            @test chol.U ≈ elty[1.3983960246234932 0.10055174323423234 0.4726180712633075 0.5283312679453536 0.10744581242866912 0.7041734747594656 0.25821185497449645
                 0. 1.2365482696982792 0.13723596736343546 0.6312068408830044 0.32377107818793416 0.37486667271940743 0.3272845766073084
                 0. 0. 0.8716243956057028 -0.12646679080935472 0.29635897553532703 0.298982588596196 0.737871778986569
                 0. 0. 0. 0.9273792313575595 0.19289178031430956 -0.3959064949144887 0.019710925942854545
                 0. 0. 0. 0. 1.2380205421376222 0.09840290872367227 -0.06348584599245834
                 0. 0. 0. 0. 0. 0.5053369729908973 -0.8290079246701668
                 0. 0. 0. 0. 0. 0. 0.20854097637370994]
+            @test inv(chol) ≈ PackedMatrix(7, elty[15.493628236589293, 18.05579181890549, 22.568195230839763,
+                -13.664618497320282, 1.6509049892926717, -31.02109455183003, -17.60766189550534, 22.83884746037381,
+                28.380477703283688, -16.691276904083473, 1.8105792940720045, -37.87395046635378, -21.93913378183722,
+                39.43723994306926, -20.71296414574622, 2.1679624382488223, -49.32438789295014, -29.465880029842584,
+                13.085254087036088, -1.5390396304367668, 27.97393922067559, 15.993513682029798, 0.8211060409222076,
+                -3.295591393817912, -1.819156241457545, 65.7991061056096, 37.72200796466474, 22.99414125333774], :L) rtol=50eps(elty)
+            rhs = elty[1.0 8.0; 2.0 9.0; 3.0 10.0; 4.0 11.0; 5.0 12.0; 6.0 13.0; 7.0 14.0]
+            @test rhs ≈ (pm + I) * (chol \ rhs)
+
+            bk = bunchkaufman(pm)
+            let P=bk.P, L=bk.L, D=bk.D
+                @test P' * L * D * L' * P ≈ Matrix(pm)
+            end
+            @test inv(bk) ≈ PackedMatrix(7, elty[11.676181149869125, -25.743042670794633, -3.8901359697162454,
+                24.102856515354063, 9.176107458680692, -26.29273501144288, 7.584280750861906, 55.837437314564454,
+                9.07719922217729, -51.37534555845255, -21.09527940024823, 59.090336295097536, -17.484312579760644,
+                1.0285759205945262, -9.226894089251154, -3.294216491388212, 9.912693866880876, -1.9062117598362565,
+                49.46819607136643, 19.103438949417765, -55.95001008561188, 16.528078653765096, 9.400381615980521,
+                -21.636130300323586, 5.966940819148875, 62.79650629970832, -19.347475787322477, 6.689363759583235], :L)
+            @test rhs ≈ pm * (bk \ rhs)
         end
     end
     @testset "Upper scaled" begin
@@ -293,20 +348,25 @@ setprecision(8)
             0.3925705265236962,0.13031356174695136,0.45340576959493983]
         pm = PackedMatrix(7, data, :US)
         @test size(pm) == (7, 7)
-        @test LinearAlgebra.checksquare(pm) == 7
+        @test LinearAlgebra.checksquare(pm) == packedside(pm) == packedside(vec(pm)) == 7
         @test eltype(pm) === elty
         @test packed_isupper(pm)
         @test !packed_islower(pm)
         @test packed_isscaled(pm)
+        @test issymmetric(pm)
+        @test ishermitian(pm)
+        @test transpose(pm) == pm
 
         @test collect(pm) == data
         @test [x for x in pm] == data
         @test Matrix(pm) ≈ refmatrix rtol=2eps(elty)
+        @test vec(lmul_offdiags!(sqrt(elty(2)), PackedMatrix(Symmetric(refmatrix)))) ≈ vec(pm) rtol=2eps(elty)
         @test [pm[i, j] for i in 1:7, j in 1:7] ≈ refmatrix rtol=2eps(elty)
         for i in 1:7, j in 1:7
             pm[i, j] = refmatrix[i, j]
         end
         @test Matrix(pm) ≈ refmatrix rtol=2eps(elty)
+        @test_throws ErrorException PackedMatrix(pm, :L)
         @test diag(pm) == diag(refmatrix)
         @test tr(pm) == tr(refmatrix)
 
@@ -367,8 +427,9 @@ setprecision(8)
             @test norm(pmcs, 3.) ≈ 12.632719195312756 rtol=2eps(elty)
         end
 
+        pmc .= pm
+        @test pmc == pm
         if elty ∈ (Float32, Float64) # we need LAPACK support for these tests
-            copyto!(pmc, pm)
             es = eigen!(pmc)
             @test es.values ≈ elty[-0.9942609100484255,-0.6811215090551395,0.005159417098787866,0.40031013318133934,
                 0.5934629480373085,0.952760032261558,3.1489516001124938]
@@ -383,7 +444,7 @@ setprecision(8)
             end
             @test eigvals(pm) ≈ es.values
             @test vec(pm) == data
-            pm2 = copy(pm)
+            pm2 = PackedMatrix(pm)
             es2 = eigen!(pm2, elty(-.7), elty(1.))
             @test es2.values ≈ @view(es.values[2:6])
             for (checkvec, refvec) in zip(eachcol(es2.vectors), eachcol(@view(es.vectors[:, 2:6])))
@@ -404,16 +465,37 @@ setprecision(8)
 
             copyto!(pmc, pm)
             @test !LinearAlgebra.isposdef(pmc)
-            @test_throws PosDefException cholesky!(pmc)
-            copyto!(pmc, pm)
+            @test_throws PosDefException cholesky(pmc)
+            @test pmc == pm
             @test LinearAlgebra.isposdef(pmc, one(elty))
-            @test cholesky!(pmc, shift=one(elty)).U ≈ elty[1.3983960246234932 0.10055174323423234 0.4726180712633075 0.5283312679453536 0.10744581242866912 0.7041734747594656 0.25821185497449645
+            chol = cholesky!(pmc, shift=one(elty))
+            @test chol.U ≈ elty[1.3983960246234932 0.10055174323423234 0.4726180712633075 0.5283312679453536 0.10744581242866912 0.7041734747594656 0.25821185497449645
                 0. 1.2365482696982792 0.13723596736343546 0.6312068408830044 0.32377107818793416 0.37486667271940743 0.3272845766073084
                 0. 0. 0.8716243956057028 -0.12646679080935472 0.29635897553532703 0.298982588596196 0.737871778986569
                 0. 0. 0. 0.9273792313575595 0.19289178031430956 -0.3959064949144887 0.019710925942854545
                 0. 0. 0. 0. 1.2380205421376222 0.09840290872367227 -0.06348584599245834
                 0. 0. 0. 0. 0. 0.5053369729908973 -0.8290079246701668
                 0. 0. 0. 0. 0. 0. 0.20854097637370994]
+            @test inv(chol) ≈ PackedMatrix(7, elty[15.493628236589293, 18.055791818905497, 22.83884746037381,
+                22.56819523083977, 28.380477703283688, 39.43723994306926, -13.664618497320284, -16.691276904083473,
+                -20.71296414574622, 13.085254087036088, 1.6509049892926726, 1.8105792940720054, 2.1679624382488236,
+                -1.5390396304367675, 0.8211060409222076, -31.02109455183003, -37.87395046635378, -49.32438789295014,
+                27.97393922067559, -3.29559139381791, 65.7991061056096, -17.607661895505345, -21.93913378183722,
+                -29.465880029842584, 15.993513682029798, -1.819156241457544, 37.72200796466474, 22.99414125333774]) rtol=150eps(elty)
+            rhs = elty[1.0 8.0; 2.0 9.0; 3.0 10.0; 4.0 11.0; 5.0 12.0; 6.0 13.0; 7.0 14.0]
+            @test rhs ≈ (pm + I) * (chol \ rhs)
+
+            bk = bunchkaufman(pm)
+            let P=bk.P, U=bk.U, D=bk.D
+                @test P' * U * D * U' * P ≈ Matrix(pm)
+            end
+            @test inv(bk) ≈ PackedMatrix(7, elty[11.676181149869125, -25.74304267079464, 55.837437314564454,
+                -3.890135969716243, 9.077199222177283, 1.0285759205945262, 24.102856515354063, -51.37534555845253,
+                -9.226894089251159,  49.46819607136643, 9.176107458680693, -21.095279400248227, -3.294216491388214,
+                19.103438949417768, 9.400381615980521, -26.29273501144287, 59.09033629509751, 9.912693866880879,
+                -55.950010085611865, -21.636130300323575, 62.79650629970832, 7.584280750861903, -17.484312579760637,
+                -1.9062117598362571, 16.528078653765096, 5.966940819148872, -19.347475787322477, 6.689363759583235])
+            @test rhs ≈ pm * (bk \ rhs)
         end
     end
     @testset "Lower scaled" begin
@@ -425,20 +507,25 @@ setprecision(8)
             0.13031356174695136,0.45340576959493983]
         pm = PackedMatrix(7, data, :LS)
         @test size(pm) == (7, 7)
-        @test LinearAlgebra.checksquare(pm) == 7
+        @test LinearAlgebra.checksquare(pm) == packedside(pm) == packedside(vec(pm)) == 7
         @test eltype(pm) === elty
         @test !packed_isupper(pm)
         @test packed_islower(pm)
         @test packed_isscaled(pm)
+        @test issymmetric(pm)
+        @test ishermitian(pm)
+        @test transpose(pm) == pm
 
         @test collect(pm) == data
         @test [x for x in pm] == data
         @test Matrix(pm) ≈ refmatrix rtol=2eps(elty)
+        @test vec(lmul_offdiags!(sqrt(elty(2)), PackedMatrix(Symmetric(refmatrix, :L)))) ≈ vec(pm) rtol=2eps(elty)
         @test [pm[i, j] for i in 1:7, j in 1:7] ≈ refmatrix rtol=2eps(elty)
         for i in 1:7, j in 1:7
             pm[i, j] = refmatrix[i, j]
         end
         @test Matrix(pm) ≈ refmatrix rtol=2eps(elty)
+        @test_throws ErrorException PackedMatrix(pm, :U)
         @test diag(pm) == diag(refmatrix)
         @test tr(pm) == tr(refmatrix)
 
@@ -499,8 +586,9 @@ setprecision(8)
             @test norm(pmcs, 3.) ≈ 12.632719195312756 rtol=2eps(elty)
         end
 
+        pmc .= pm
+        @test pmc == pm
         if elty ∈ (Float32, Float64) # we need LAPACK support for these tests
-            copyto!(pmc, pm)
             es = eigen!(pmc)
             @test es.values ≈ elty[-0.9942609100484255,-0.6811215090551395,0.005159417098787866,0.40031013318133934,
                 0.5934629480373085,0.952760032261558,3.1489516001124938]
@@ -515,7 +603,7 @@ setprecision(8)
             end
             @test eigvals(pm) ≈ es.values
             @test vec(pm) == data
-            pm2 = copy(pm)
+            pm2 = PackedMatrix(pm)
             es2 = eigen!(pm2, elty(-.7), elty(1.))
             @test es2.values ≈ @view(es.values[2:6])
             for (checkvec, refvec) in zip(eachcol(es2.vectors), eachcol(@view(es.vectors[:, 2:6])))
@@ -536,16 +624,37 @@ setprecision(8)
 
             copyto!(pmc, pm)
             @test !LinearAlgebra.isposdef(pmc)
-            @test_throws PosDefException cholesky!(pmc)
-            copyto!(pmc, pm)
+            @test_throws PosDefException cholesky(pmc)
+            @test pmc == pm
             @test LinearAlgebra.isposdef(pmc, one(elty))
-            @test cholesky!(pmc, shift=one(elty)).U ≈ elty[1.3983960246234932 0.10055174323423234 0.4726180712633075 0.5283312679453536 0.10744581242866912 0.7041734747594656 0.25821185497449645
+            chol = cholesky!(pmc, shift=one(elty))
+            @test chol.U ≈ elty[1.3983960246234932 0.10055174323423234 0.4726180712633075 0.5283312679453536 0.10744581242866912 0.7041734747594656 0.25821185497449645
                 0. 1.2365482696982792 0.13723596736343546 0.6312068408830044 0.32377107818793416 0.37486667271940743 0.3272845766073084
                 0. 0. 0.8716243956057028 -0.12646679080935472 0.29635897553532703 0.298982588596196 0.737871778986569
                 0. 0. 0. 0.9273792313575595 0.19289178031430956 -0.3959064949144887 0.019710925942854545
                 0. 0. 0. 0. 1.2380205421376222 0.09840290872367227 -0.06348584599245834
                 0. 0. 0. 0. 0. 0.5053369729908973 -0.8290079246701668
                 0. 0. 0. 0. 0. 0. 0.20854097637370994]
+            @test inv(chol) ≈ PackedMatrix(7, elty[15.493628236589293, 18.05579181890549, 22.568195230839763,
+                -13.664618497320282, 1.6509049892926717, -31.02109455183003, -17.60766189550534, 22.83884746037381,
+                28.380477703283688, -16.691276904083473, 1.8105792940720045, -37.87395046635378, -21.93913378183722,
+                39.43723994306926, -20.71296414574622, 2.1679624382488223, -49.32438789295014, -29.465880029842584,
+                13.085254087036088, -1.5390396304367668, 27.97393922067559, 15.993513682029798, 0.8211060409222076,
+                -3.295591393817912, -1.819156241457545, 65.7991061056096, 37.72200796466474, 22.99414125333774], :L) rtol=150eps(elty)
+            rhs = elty[1.0 8.0; 2.0 9.0; 3.0 10.0; 4.0 11.0; 5.0 12.0; 6.0 13.0; 7.0 14.0]
+            @test rhs ≈ (pm + I) * (chol \ rhs)
+
+            bk = bunchkaufman(pm)
+            let P=bk.P, L=bk.L, D=bk.D
+                @test P' * L * D * L' * P ≈ Matrix(pm)
+            end
+            @test inv(bk) ≈ PackedMatrix(7, elty[11.676181149869125, -25.743042670794633, -3.8901359697162454,
+                24.102856515354063, 9.176107458680692, -26.29273501144288, 7.584280750861906, 55.837437314564454,
+                9.07719922217729, -51.37534555845255, -21.09527940024823, 59.090336295097536, -17.484312579760644,
+                1.0285759205945262, -9.226894089251154, -3.294216491388212, 9.912693866880876, -1.9062117598362565,
+                49.46819607136643, 19.103438949417765, -55.95001008561188, 16.528078653765096, 9.400381615980521,
+                -21.636130300323586, 5.966940819148875, 62.79650629970832, -19.347475787322477, 6.689363759583235], :L)
+            @test rhs ≈ pm * (bk \ rhs)
         end
     end
 end end
