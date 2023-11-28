@@ -70,9 +70,6 @@ export spmv!, hpmv!, spr!, hpr!,
 # - equilibrate:                              slaqsp, dlaqsp, claqhp, zlaqhp (not implemented)
 # - equilibrate symmetrix complex:                            claqsp, zlaqsp (not implemented)
 
-nameSH(::Type{<:Real}, realname::Symbol, ::Symbol) = realname
-nameSH(::Type{<:Complex}, ::Symbol, complexname::Symbol) = complexname
-
 const PtrOrVec{T} = Union{Ptr{T},<:AbstractVector{T}}
 const PtrOrMat{T} = Union{Ptr{T},<:AbstractMatrix{T}}
 const PtrOrVecOrMat{T} = Union{Ptr{T},<:AbstractVector{T},<:AbstractMatrix{T}}
