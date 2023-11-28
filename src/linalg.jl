@@ -216,6 +216,127 @@ LinearAlgebra.inv(B::BunchKaufman{T,<:PackedMatrix}, work::Union{<:AbstractVecto
 LinearAlgebra.inv(B::BunchKaufman{T,<:PackedMatrix}, work::Union{<:AbstractVector{T},Missing}=missing) where {T<:BlasComplex} =
     hptri!(copy(B.LD), B.ipiv, work)
 
+# We need to adopt this function for BunchKaufman, as all the fields are lazily calculated
+function Base.getproperty(B::BunchKaufman{T,<:PackedMatrixUnscaled}, d::Symbol) where {T<:BlasFloat}
+    @assert(!getfield(B, :rook))
+    n = size(B, 1)
+    if d === :p
+        return LinearAlgebra._ipiv2perm_bk(getfield(B, :ipiv), n, getfield(B, :uplo), false)
+    elseif d === :P
+        return Matrix{T}(I, n, n)[:,invperm(B.p)]
+    elseif d === :L || d === :U || d === :D
+        LUD, od = syconv_packed!(copy(getfield(B, :LD)), getfield(B, :ipiv))
+        if d === :D
+            if getfield(B, :uplo) == 'L'
+                odl = od[1:n - 1]
+                return Tridiagonal(odl, diag(LUD), getfield(B, :symmetric) ? odl : conj.(odl))
+            else # 'U'
+                odu = od[2:n]
+                return Tridiagonal(getfield(B, :symmetric) ? odu : conj.(odu), diag(LUD), odu)
+            end
+        elseif d === :L
+            if getfield(B, :uplo) == 'L'
+                return UnitLowerTriangular(LUD)
+            else
+                throw(ArgumentError("factorization is U*D*transpose(U) but you requested L"))
+            end
+        else # :U
+            if B.uplo == 'U'
+                return UnitUpperTriangular(LUD)
+            else
+                throw(ArgumentError("factorization is L*D*transpose(L) but you requested U"))
+            end
+        end
+    else
+        getfield(B, d)
+    end
+end
+
+# LAPACK does not provide a function for packed syconv matrices, so we translate the reference implementation to Julia.
+# We only implement the convert way, not the revert way.
+@pmalso function syconv_packed!(uplo::AbstractChar, A::PM{T}, ipiv::AbstractVector{<:Integer},
+    E::Union{AbstractVector{T},Missing}=missing) where {T}
+    chkuplo(uplo)
+    n = packedside(A)
+    length(ipiv) != n && throw(DimensionMismatch("ipiv has length $(length(ipiv)), but needs $n"))
+    if ismissing(E)
+        E = Vector{T}(undef, n)
+    else
+        length(E) != n && throw(DimensionMismatch("E has length $(length(E)), but needs $n"))
+    end
+    iszero(n) && return A, E
+    @inbounds if uplo == 'U'
+        # convert VALUE
+        i = n
+        E[1] = zero(T)
+        while i > 1
+            if ipiv[i] < 0
+                E[i] = A[i-1, i]
+                E[i-1] = zero(T)
+                A[i-1, i] = zero(T)
+                i -= 1
+            else
+                E[i] = zero(T)
+            end
+            i -= 1
+        end
+        # convert PERMUTATIONS
+        i = n
+        while i ≥ 1
+            if ipiv[i] > 0
+                ip = ipiv[i]
+                for j in i+1:n
+                    A[ip, j], A[i, j] = A[i, j], A[ip, j]
+                end
+            else
+                ip = -ipiv[i]
+                for j in i+1:n
+                    A[ip, j], A[i-1, j] = A[i-1, j], A[ip, j]
+                end
+                i -= 1
+            end
+            i -= 1
+        end
+    else
+        # convert VALUE
+        i = 1
+        E[n] = zero(T)
+        while i ≤ n
+            if i < n && ipiv[i] < 0
+                E[i] = A[i+1, i]
+                E[i+1] = zero(T)
+                A[i+1, i] = zero(T)
+                i += 1
+            else
+                E[i] = zero(T)
+            end
+            i += 1
+        end
+        # convert PERMUTATIONS
+        i = 1
+        while i ≤ n
+            if ipiv[i] > 0
+                ip = ipiv[i]
+                for j in 1:i-1
+                    A[ip, j], A[i, j] = A[i, j], A[ip, j]
+                end
+            else
+                ip = -ipiv[i]
+                for j in 1:i-1
+                    A[ip, j], A[i+1, j] = A[i+1, j], A[ip, j]
+                end
+                i += 1
+            end
+            i += 1
+        end
+    end
+    return A, E
+end
+
+# If we don't implement this, the \ operator will convert the packed matrix back to a dense matrix
+BunchKaufman{T}(B::BunchKaufman{Q,<:PackedMatrix} where {Q}) where {T} =
+    BunchKaufman(convert(PackedMatrix{T}, B.LD), B.ipiv, B.uplo, B.symmetric, B.rook, B.info)
+
 
 LinearAlgebra.eigvals(P::PackedMatrix{<:BlasFloat}, args...) = eigvals!(copy(P), args...)
 """
