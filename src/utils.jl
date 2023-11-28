@@ -25,7 +25,7 @@ Calculates the side dimension of a vector `AP` of size `fullside` representing a
     @boundscheck(chkpacked(n, fullsize))
     return n
 end
-Base.@propagate_inbounds packedside(AP::AbstractVector) = sidedim(length(AP))
+Base.@propagate_inbounds packedside(AP::AbstractVector) = packedside(length(AP))
 packedside(P::PackedMatrix) = P.dim
 
 
