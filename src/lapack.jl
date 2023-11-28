@@ -1,6 +1,6 @@
 using Base: require_one_based_indexing, _realtype
-using LinearAlgebra: libblastrampoline, BlasReal, BlasComplex, BlasFloat, BlasInt, DimensionMismatch, checksquare, chkstride1
-using LinearAlgebra.BLAS: @blasfunc, chkuplo
+using LinearAlgebra: BlasReal, BlasComplex, BlasFloat, BlasInt, DimensionMismatch, checksquare, chkstride1
+using LinearAlgebra.BLAS: libblastrampoline, @blasfunc, chkuplo
 import LinearAlgebra.BLAS: spmv!, hpmv!, spr!
 using LinearAlgebra.LAPACK: chklapackerror, chkfinite, chkargsok, chknonsingular
 
