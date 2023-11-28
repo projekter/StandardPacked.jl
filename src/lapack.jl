@@ -1,8 +1,24 @@
 using Base: require_one_based_indexing, _realtype
 using LinearAlgebra: BlasReal, BlasComplex, BlasFloat, BlasInt, DimensionMismatch, checksquare, chkstride1
-using LinearAlgebra.BLAS: libblastrampoline, @blasfunc, chkuplo
-import LinearAlgebra.BLAS: spmv!, hpmv!, spr!
-using LinearAlgebra.LAPACK: chklapackerror, chkfinite, chkargsok, chknonsingular
+using LinearAlgebra.BLAS: libblastrampoline, @blasfunc
+import LinearAlgebra.BLAS: spmv!, hpmv!
+using LinearAlgebra.LAPACK: chklapackerror, chkargsok, chknonsingular
+
+if VERSION ≥ v"1.8"
+    using LinearAlgebra.BLAS: chkuplo
+    import LinearAlgebra.BLAS: spr!
+else
+    function chkuplo(uplo::AbstractChar)
+        if !(uplo == 'U' || uplo == 'L')
+            throw(ArgumentError(lazy"uplo argument must be 'U' (upper) or 'L' (lower), got $uplo"))
+        end
+        uplo
+    end
+
+    macro lazy_str(e)
+        esc(e)
+    end
+end
 
 export spmv!, hpmv!, spr!, hpr!,
     gemmt!,
