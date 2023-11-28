@@ -44,6 +44,12 @@ struct PackedMatrix{R,V<:AbstractVector{R},Fmt} <: AbstractMatrix{R}
     end
 end
 
+"""
+    PackedMatrix(P::PackedMatrix, format=packed_format(P))
+
+Creates a copy of the packed matrix `P`, possibly changing the format from scaled to unscaled. Note that a change between lower
+or upper representation is not allowed.
+"""
 function PackedMatrix(P::PackedMatrix, format::Symbol=packed_format(P))
     packed_isupper(P) == packed_isupper(format) || error("Changing the storage direction is not supported at the moment")
     if packed_isscaled(format)
@@ -313,34 +319,37 @@ Returns the vectorized data associated with `P`. Note that this returns the actu
 """
 LinearAlgebra.vec(P::PackedMatrix) = P.data
 
-"""
-    Matrix{R}(::PackedMatrix{R}, viewtype=R isa Complex ? Hermitian : Symmetric) where {R}
-
-Construct a dense matrix from a packed matrix. The parameter `symmetric` determines which kind of view is returned.
-"""
-function Base.Matrix{R}(P::PackedMatrixUnscaled{R}, viewtype=R isa Complex ? Hermitian : Symmetric) where {R}
+function Base.convert(::Type{Matrix{R}}, P::PackedMatrixUnscaled{R}) where {R}
     result = Matrix{R}(undef, P.dim, P.dim)
     tpttr!(packed_ulchar(P), P.data, result)
-    return viewtype(result, packed_isupper(P) ? :U : :L)
+    return result
 end
-function Base.Matrix{R}(P::PackedMatrix{R,V,:US}, viewtype=R isa Complex ? Hermitian : Symmetric) where {R,V}
+function Base.convert(::Type{Matrix{R}}, P::PackedMatrix{R,V,:US}) where {R,V}
     result = Matrix{R}(undef, P.dim, P.dim)
     tpttr!('U', P.data, result)
     for j in 2:P.dim
         @inbounds rmul!(@view(result[1:j-1, j]), sqrt(inv(R(2))))
     end
-    return viewtype(result, :U)
+    return result
 end
-function Base.Matrix{R}(P::PackedMatrix{R,V,:LS}, viewtype=R isa Complex ? Hermitian : Symmetric) where {R,V}
+function Base.convert(::Type{Matrix{R}}, P::PackedMatrix{R,V,:LS}) where {R,V}
     result = Matrix{R}(undef, P.dim, P.dim)
     tpttr!('L', P.data, result)
     for j in 1:P.dim-1
         @inbounds rmul!(@view(result[j+1:end, j]), sqrt(inv(R(2))))
     end
-    return viewtype(result, :L)
+    return result
 end
 """
-    PackedMatrix(::Union{<:Hermitian,<:Symmetric})
+    Matrix{R}(P::PackedMatrix{R}, viewtype=R isa Complex ? Hermitian : Symmetric) where {R}
+
+Construct a dense matrix from a packed matrix. The parameter `symmetric` determines which kind of view is returned. Use
+`convert(Matrix{R}, PackedMatrix{R})` to return the matrix itself.
+"""
+Base.Matrix{R}(P::PackedMatrix{R}, viewtype=R isa Complex ? Hermitian : Symmetric) where {R} =
+    viewtype(convert(Matrix{R}, P), packed_isupper(P) ? :U : :L)
+"""
+    PackedMatrix(A::Union{<:Hermitian,<:Symmetric})
 
 Construct a packed matrix from a Hermitian or symmetric wrapper of any other matrix. Note that in case a symmetric wrapper is
 used, the element type must be invariant under conjugation (but this is not checked)!
