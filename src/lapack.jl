@@ -10,13 +10,9 @@ if VERSION ≥ v"1.8"
 else
     function chkuplo(uplo::AbstractChar)
         if !(uplo == 'U' || uplo == 'L')
-            throw(ArgumentError(lazy"uplo argument must be 'U' (upper) or 'L' (lower), got $uplo"))
+            throw(ArgumentError("uplo argument must be 'U' (upper) or 'L' (lower), got $uplo"))
         end
         uplo
-    end
-
-    macro lazy_str(e)
-        esc(e)
     end
 end
 
@@ -182,7 +178,7 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
                 kb = size(B, transB == 'N' ? 1 : 2)
                 n = size(B, transB == 'N' ? 2 : 1)
                 if ka != kb || m != checksquare(C) || n != m
-                    throw(DimensionMismatch(lazy"A has size ($m,$ka), B has size ($kb,$n), C has size $(size(C))"))
+                    throw(DimensionMismatch("A has size ($m,$ka), B has size ($kb,$n), C has size $(size(C))"))
                 end
                 chkstride1(A, B, C)
                 @blascall $gemmt(
@@ -843,7 +839,7 @@ else
         require_one_based_indexing(APv, x)
         N = length(x)
         2length(AP) < N*(N + 1) ||
-            throw(DimensionMismatch(lazy"Packed symmetric matrix A has size smaller than length(x) = $(N)."))
+            throw(DimensionMismatch("Packed symmetric matrix A has size smaller than length(x) = $(N)."))
         chkstride1(APv)
         px, stx = vec_pointer_stride(x, ArgumentError("input vector with 0 stride is not allowed"))
         PM <: PackedMatrixScaled && (AP = packed_unscale!(AP))
@@ -876,7 +872,7 @@ end
     require_one_based_indexing(APv, x)
     N = length(x)
     2length(APv) ≥ N*(N + 1) ||
-        throw(DimensionMismatch(lazy"Packed symmetric matrix A has size smaller than length(x) = $(N)."))
+        throw(DimensionMismatch("Packed symmetric matrix A has size smaller than length(x) = $(N)."))
     chkstride1(APv)
     px, stx = vec_pointer_stride(x, ArgumentError("input vector with 0 stride is not allowed"))
     PM <: PackedMatrixScaled && (AP = packed_unscale!(AP))
