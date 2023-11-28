@@ -875,7 +875,7 @@ end
     return GC.@preserve x hpr!(uplo, N, T(α), px, stx, APv)
 end
 
-@doc """
+"""
     hpr!(uplo, α, x, AP::AbstractVector)
     hpr!(α, x, AP::PackedMatrix)
 
@@ -895,7 +895,7 @@ $warnunscale
 """
 hpr!
 
-@doc """
+"""
     gemmt!(uplo, transA, transB, alpha, A, B, beta, C)
 
 `gemmt!` computes a matrix-matrix product with general matrices but updates only the upper or lower triangular part of the
@@ -990,7 +990,7 @@ tpttr!
     return pptrf!(uplo, packedside(AP), APv)
 end
 
-@doc """
+"""
     pptrf!(uplo, AP::AbstractVector) -> (AP, info)
     pptrf!(AP::PackedMatrix) -> (AP, info)
 
@@ -1017,7 +1017,7 @@ pptrf!
     return pptrs!(uplo, n, nrhs, APv, B, max(1, stride(B, 2)))
 end
 
-@doc raw"""
+"""
     pptrs!(uplo, AP::AbstractVector, B)
     pptrs!(AP::PackedMatrixUnscaled, B)
 
@@ -1032,7 +1032,7 @@ pptrs!
     return pptri!(uplo, packedside(AP), APv)
 end
 
-@doc raw"""
+"""
     pptri!(uplo, AP::AbstractVector)
     pptri!(AP::PackedMatrixUnscaled)
 
@@ -1871,7 +1871,7 @@ end
     return evs, evecs, BP
 end
 
-@doc """
+"""
     spgv!(itype, 'N', uplo, AP::AbstractVector, BP::AbstractVector, W=missing,
         work=missing[, rwork=missing]) -> (W, BP)
     spgv!(itype, 'N', AP::PackedMatrix, BP::PackedMatrix, W=missing, work=missing
@@ -2122,7 +2122,7 @@ end
     return @view(W[1:m]), @view(Z[:, 1:m]), info, @view(ifail[]), BP
 end
 
-@doc """
+"""
     spgvx!(itype, 'N', range, uplo, AP::AbstractVector, BP::AbstractVector, vl, vu,
         il, iu, abstol, W=missing, work=missing[, rwork=missing], iwork=missing)
         -> (view(W), BP)
@@ -2326,7 +2326,7 @@ end
     return evs, evecs, BP
 end
 
-@doc """
+"""
     spgvd!(itype, 'N', uplo, AP::AbstractVector, BP::AbstractVector, W=missing,
         work=missing[, rwork=missing], iwork=missing) -> W
     spgvd!(itype, 'N', AP::PackedMatrix, BP::PackedMatrix, W=missing, work=missing
