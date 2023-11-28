@@ -9,9 +9,11 @@ Calculates the number of unique entries in a symmetric matrix `A` with side dime
 """
 @inline packedsize(dim::Integer) = dim * (dim +1) ÷ 2
 @inline packedsize(A::AbstractMatrix) = packedsize(LinearAlgebra.checksquare(A))
-chkpacked(n::Integer, fullsize::Integer) = 2fullsize == n * (n +1) || error("Packed storage length does not match dimension")
+chkpacked(n::Integer, fullsize::Integer) = 2fullsize == n * (n +1) ||
+    throw(DimensionMismatch("Packed storage length does not match dimension"))
 @inline chkpacked(n::Integer, AP::AbstractVector) = chkpacked(n, length(AP))
-@inline chkpacked(n::Integer, P::PackedMatrix) = n == P.dim || error("Packed storage length does not match dimension")
+@inline chkpacked(n::Integer, P::PackedMatrix) = n == P.dim ||
+    throw(DimensionMismatch("Packed storage length does not match dimension"))
 @doc raw"""
     packedside(fullsize::Integer)
     packedside(AP::AbstractVector)

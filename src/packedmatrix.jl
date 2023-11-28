@@ -285,6 +285,7 @@ end
         j += l
         l -= 1
     end
+    return dst
 end
 @inline function Base.copyto!(dst::PackedMatrix{R,V,:LS}, src::AbstractMatrix{R}) where {R,V}
     @boundscheck checksquare(src) == dst.dim || throw(DimensionMismatch("Matrices must have the same size"))
@@ -296,6 +297,7 @@ end
         j += l
         l -= 1
     end
+    return dst
 end
 @inline function Base.copy!(dst::PackedMatrix{R}, src::AbstractMatrix{R}) where {R}
     @boundscheck checkbounds(src, axes(dst)...)
