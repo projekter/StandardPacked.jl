@@ -14,7 +14,7 @@ export spmv!, hpmv!, spr!, hpr!,
 # - Hermitian matrix-vector multiply:         sspmv,  dspmv,  chpmv,  zhpmv  (Base: spmv!, hpmv!)
 # - symmetric complex matrix-vector multiply:                 cspmv,  zspmv  (not implemented)
 # - triangular matrix-vector multiply:        stpmv,  dtpmv,  ctpmv,  ztpmv  (not implemented)
-# - rank-1 update:                            sspr,   dspr                   (Base: spr!)
+# - rank-1 update:                            sspr,   dspr                   (Base: spr! for Julia ≥ 1.8, else: here)
 #                                                             chpr,   zhpr   (here: hpr!)
 # - symmetric complex rank-1 update:                          cspr,   zspr   (not implemented)
 # - rank-2 update:                            sspr2,  dspr2,  chpr2,  zhpr2  (not implemented)
@@ -115,25 +115,6 @@ const warnunscale = """
     automatically call [`packed_unscale!`](@ref) on the matrix and return the unscaled result. Do not use the reference to the
     scaled matrix any more, only the result of this function!
 """
-
-spmv!(α::Real, AP::PackedMatrixUnscaled, args...) = spmv!(packed_ulchar(AP), α, vec(AP), args...)
-@doc replace(@doc(spmv!).meta[:results][1].text[1],
-    "    spmv!(uplo, α, AP, x, β, y)" => "    spmv!(uplo, α, AP::AbstractVector, x, β, y)
-    spmv!(α, AP::PackedMatrixUnscaled, x, β, y)") spmv!
-
-hpmv!(α::Number, AP::PackedMatrixUnscaled, args...) = hpmv!(packed_ulchar(AP), α, vec(AP), args...)
-@doc replace(@doc(spmv!).meta[:results][1].text[1],
-    "    hpmv!(uplo, α, AP, x, β, y)" => "    hpmv!(uplo, α, AP::AbstractVector, x, β, y)
-    hpmv!(α, AP::PackedMatrixUnscaled, x, β, y)") hpmv!
-
-function spr!(α::Real, x::AbstractArray{T}, AP::PackedMatrix{T}) where {T<:BlasReal}
-    AP = packed_unscale!(AP)
-    spr!(packed_ulchar(AP), α, x, vec(AP))
-    return AP
-end
-@doc (replace(@doc(spr!).meta[:results][1].text[1],
-    "    spr!(uplo, α, x, AP)" => "    spr!(uplo, α, x, AP::AbstractVector)
-    spr!(α, x, AP::PackedMatrix)") * warnunscale) spr!
 
 for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv,    hpsv,    sptrf,    hptrf,    sptrs,    hptrs,    sptri,    hptri,    spev,    spevx,    spevd,    spgv,    spgvx,    spgvd,    hptrd,    opgtr,    opmtr,  elty) in
    ((nothing, :sgemmt_, :strttp_, :stpttr_, :spptrf_, :spptrs_, :spptri_, :sspsv_, nothing, :ssptrf_, nothing,  :ssptrs_, nothing,  :ssptri_, nothing,  :sspev_, :sspevx_, :sspevd_, :sspgv_, :sspgvx_, :sspgvd_, :ssptrd_, :sopgtr_, :sopmtr_, Float32),
@@ -818,6 +799,70 @@ macro pmalso(scaled, fun=nothing)
         $fun
         $fun2
     end)
+end
+
+spmv!(α::Real, AP::PackedMatrixUnscaled, args...) = spmv!(packed_ulchar(AP), α, vec(AP), args...)
+@doc replace(@doc(spmv!).meta[:results][1].text[1],
+    "    spmv!(uplo, α, AP, x, β, y)" => "    spmv!(uplo, α, AP::AbstractVector, x, β, y)
+    spmv!(α, AP::PackedMatrixUnscaled, x, β, y)") spmv!
+
+hpmv!(α::Number, AP::PackedMatrixUnscaled, args...) = hpmv!(packed_ulchar(AP), α, vec(AP), args...)
+@doc replace(@doc(spmv!).meta[:results][1].text[1],
+    "    hpmv!(uplo, α, AP, x, β, y)" => "    hpmv!(uplo, α, AP::AbstractVector, x, β, y)
+    hpmv!(α, AP::PackedMatrixUnscaled, x, β, y)") hpmv!
+
+if VERSION ≥ v"1.8"
+    function spr!(α::Real, x::AbstractArray{T}, AP::PackedMatrix{T}) where {T<:BlasReal}
+        AP = packed_unscale!(AP)
+        spr!(packed_ulchar(AP), α, x, vec(AP))
+        return AP
+    end
+    @doc (replace(@doc(spr!).meta[:results][1].text[1],
+        "    spr!(uplo, α, x, AP)" => "    spr!(uplo, α, x, AP::AbstractVector)
+        spr!(α, x, AP::PackedMatrix)") * warnunscale) spr!
+else
+    for (spr, elty) in ((:sspr_, Float32), (:dspr_, Float64))
+        @eval begin
+            function spr!(uplo::AbstractChar, n::Integer, α::$elty, x::PtrOrVec{$elty}, incx::Integer, AP::PtrOrVec{$elty})
+                chkuplo(uplo)
+                @blascall $spr(
+                    uplo::Ref{UInt8}, n::Ref{BlasInt}, α::Ref{$elty}, x::Ptr{$elty}, incx::Ref{BlasInt}, AP::Ptr{$elty},
+                    1::Clong
+                )
+                return AP
+            end
+        end
+    end
+
+    @pmalso :unscale function spr!(uplo::AbstractChar, α::Real, x::AbstractArray{T}, AP::PM{T}) where {T<:BlasReal}
+        require_one_based_indexing(APv, x)
+        N = length(x)
+        2length(AP) < N*(N + 1) ||
+            throw(DimensionMismatch(lazy"Packed symmetric matrix A has size smaller than length(x) = $(N)."))
+        chkstride1(APv)
+        px, stx = vec_pointer_stride(x, ArgumentError("input vector with 0 stride is not allowed"))
+        return GC.@preserve x spr!(uplo, N, T(α), px, stx , APv)
+    end
+
+"""
+    spr!(uplo, α, x, AP::AbstractVector)
+    spr!(α, x, AP::PackedMatrix)
+
+Update matrix ``A`` as ``A + \\alpha x x'``, where ``A`` is a symmetric matrix provided in packed format `AP` and `x` is a
+vector.
+
+With `uplo = 'U'`, the vector `AP` must contain the upper triangular part of the Hermitian matrix packed sequentially, column
+by column, so that `AP[1]` contains `A[1, 1]`, `AP[2]` and `AP[3]` contain `A[1, 2]` and `A[2, 2]` respectively, and so on.
+
+With `uplo = 'L'`, the vector `AP` must contain the lower triangular part of the symmetric matrix packed sequentially, column
+by column, so that `AP[1]` contains `A[1, 1]`, `AP[2]` and `AP[3]` contain `A[2, 1]` and `A[3, 1]` respectively, and so on.
+
+The scalar input `α` must be real.
+
+The array inputs `x` and `AP` must all be of `Float32` or `Float64` type. Return the updated `AP`.
+$warnunscale
+"""
+    spr!
 end
 
 @pmalso :unscale function hpr!(uplo::AbstractChar, α::Real, x::AbstractVector{T}, AP::PM{T}) where {T<:BlasComplex}
