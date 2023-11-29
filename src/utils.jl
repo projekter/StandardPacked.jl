@@ -97,13 +97,13 @@ Base.length(iter::PackedDiagonalIterator) = iter.dim - iter.k
 
 
 """
-    rmul_diags!(P::PackedMatrix{R}, factor::R) where {R}
+    rmul_diags!(P::PackedMatrix, factor)
 
 Right-multiplies all diagonal entries in `P` by `factor`. Returns `P`.
 
 See also [`lmul_diags!`](@ref), [`rmul_offdiags!`](@ref), [`lmul_offdiags!`](@ref).
 """
-function rmul_diags!(P::PackedMatrix{R}, factor::R) where {R}
+function rmul_diags!(P::PackedMatrix, factor)
     data = P.data
     for i in PackedDiagonalIterator(P)
         @inbounds data[i] = data[i] * factor
@@ -111,13 +111,13 @@ function rmul_diags!(P::PackedMatrix{R}, factor::R) where {R}
     return P
 end
 """
-    rmul_offdiags!(P::PackedMatrix{R}, factor::R) where {R}
+    rmul_offdiags!(P::PackedMatrix, factor)
 
 Right-multiplies all off-diagonal entries in `P` by `factor`. Returns `P`.
 
 See also [`rmul_diags!`](@ref), [`lmul_diags!`](@ref), [`lmul_offdiags!`](@ref).
 """
-function rmul_offdiags!(P::PackedMatrix{R}, factor::R) where {R}
+function rmul_offdiags!(P::PackedMatrix, factor)
     diags = PackedDiagonalIterator(P)
     data = P.data
     for (d₁, d₂) in zip(diags, Iterators.drop(diags, 1))
@@ -126,13 +126,13 @@ function rmul_offdiags!(P::PackedMatrix{R}, factor::R) where {R}
     return P
 end
 """
-    lmul_diags!(P::PackedMatrix{R}, factor::R) where {R}
+    lmul_diags!(factor, P::PackedMatrix)
 
 Left-multiplies all diagonal entries in `P` by `factor`. Returns `P`.
 
 See also [`rmul_diags!`](@ref), [`rmul_offdiags!`](@ref), [`lmul_offdiags!`](@ref).
 """
-function lmul_diags!(factor::R, P::PackedMatrix{R}) where {R}
+function lmul_diags!(factor, P::PackedMatrix)
     data = P.data
     for i in PackedDiagonalIterator(P)
         @inbounds data[i] = factor * data[i]
@@ -140,13 +140,13 @@ function lmul_diags!(factor::R, P::PackedMatrix{R}) where {R}
     return P
 end
 """
-    lmul_offdiags!(P::PackedMatrix{R}, factor::R) where {R}
+    lmul_offdiags!(factor, P::PackedMatrix)
 
 Left-multiplies all diagonal entries in `P` by `factor`. Returns `P`.
 
 See also [`rmul_diags!`](@ref), [`rmul_offdiags!`](@ref), [`lmul_diags!`](@ref).
 """
-function lmul_offdiags!(factor::R, P::PackedMatrix{R}) where {R}
+function lmul_offdiags!(factor, P::PackedMatrix)
     diags = PackedDiagonalIterator(P)
     data = P.data
     for (d₁, d₂) in zip(diags, Iterators.drop(diags, 1))

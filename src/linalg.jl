@@ -549,7 +549,7 @@ function LinearAlgebra.diag(P::PackedMatrix{R}, k::Integer=0) where {R}
 end
 
 
-function normapply(f, P::PackedMatrix{R}, init::T=zero(R)) where {R,T}
+function normapply(f, P::PackedMatrix{R}, init::T=zero(_realtype(R))) where {R,T}
     result::T = init
     diags = PackedDiagonalIterator(P)
     cur_diag = iterate(diags)
@@ -574,7 +574,7 @@ function normapply(f, P::PackedMatrix{R,<:SparseVector}) where {R}
     diags = PackedDiagonalIterator(P)
     cur_diag = iterate(diags)
     isnothing(cur_diag) && return zero(R)
-    result = zero(R)
+    result = zero(_realtype(R))
     @inbounds for i in 1:length(nzs)
         j = nzs[i]
         while cur_diag[1] < j
@@ -595,14 +595,15 @@ function normapply(f, P::PackedMatrix{R,<:SparseVector}) where {R}
 end
 LinearAlgebra.norm2(P::PackedMatrixUnscaled) = sqrt(normapply((Σ, x, diag) -> Σ + (diag ? norm(x)^2 : 2norm(x)^2), P))
 LinearAlgebra.norm2(P::PackedMatrixScaled) = LinearAlgebra.norm2(P.data)
-LinearAlgebra.norm2(P::PackedMatrixScaled{R,<:SparseVector}) where {R} = LinearAlgebra.norm2(nonzeros(P.data))
+LinearAlgebra.norm2(P::PackedMatrixScaled{R,<:SparseVector} where {R}) = LinearAlgebra.norm2(nonzeros(P.data))
 LinearAlgebra.norm1(P::PackedMatrix) = normapply((Σ, x, diag) -> Σ + (diag ? norm(x) : 2norm(x)), P)
 LinearAlgebra.normInf(P::PackedMatrixUnscaled) = LinearAlgebra.normInf(P.data)
 LinearAlgebra.normInf(P::PackedMatrixScaled) = normapply((m, x, diag) -> max(m, norm(x)), P)
 Base._simple_count(f, P::PackedMatrix, init::T) where {T} =
     normapply((Σ, x, diag) -> f(x) ? (diag ? Σ + one(T) : Σ + one(T) + one(T)) : Σ, P, init)
 LinearAlgebra.normMinusInf(P::PackedMatrixUnscaled) = LinearAlgebra.normMinusInf(P.data)
-LinearAlgebra.normMinusInf(P::PackedMatrixScaled{R}) where {R} = normapply((m, x, diag) -> min(m, norm(x)), P, R(Inf))
+LinearAlgebra.normMinusInf(P::PackedMatrixScaled{R}) where {R} = normapply((m, x, diag) -> min(m, norm(x)), P,
+    _realtype(R)(Inf))
 LinearAlgebra.normp(P::PackedMatrix, p) = normapply((Σ, x, diag) -> Σ + (diag ? norm(x)^p : 2norm(x)^p), P)^(1/p)
 
 """

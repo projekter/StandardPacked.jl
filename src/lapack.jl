@@ -1,7 +1,7 @@
 using Base: require_one_based_indexing, _realtype
 using LinearAlgebra: BlasReal, BlasComplex, BlasFloat, BlasInt, DimensionMismatch, checksquare, chkstride1
 using LinearAlgebra.BLAS: libblastrampoline, @blasfunc, chkuplo
-import LinearAlgebra.BLAS: spmv!, hpmv!, spr!
+import LinearAlgebra.BLAS: spmv!, hpmv!, spr!, vec_pointer_stride
 using LinearAlgebra.LAPACK: chklapackerror, chkargsok, chknonsingular
 
 export spmv!, hpmv!, spr!, hpr!,
@@ -118,6 +118,7 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
     (nothing, :dgemmt_, :dtrttp_, :dtpttr_, :dpptrf_, :dpptrs_, :dpptri_, :sspsv_, nothing, :dsptrf_, nothing,  :dsptrs_, nothing,  :dsptri_, nothing,  :dspev_, :dspevx_, :dspevd_, :dspgv_, :dspgvx_, :dspgvd_, :dsptrd_, :dopgtr_, :dopmtr_, Float64),
     (:chpr_,  :cgemmt_, :ctrttp_, :ctpttr_, :cpptrf_, :cpptrs_, :cpptri_, :cspsv_, :chpsv_, :csptrf_, :chptrf_, :csptrs_, :chptrs_, :csptri_, :chptri_, :chpev_, :chpevx_, :chpevd_, :chpgv_, :chpgvx_, :chpgvd_, :chptrd_, :cupgtr_, :cupmtr_, ComplexF32),
     (:zhpr_,  :zgemmt_, :ztrttp_, :ztpttr_, :zpptrf_, :zpptrs_, :zpptri_, :zspsv_, :zhpsv_, :zsptrf_, :zhptrf_, :zsptrs_, :zhptrs_, :zsptri_, :zhptri_, :zhpev_, :zhpevx_, :zhpevd_, :zhpgv_, :zhpgvx_, :zhpgvd_, :zhptrd_, :zupgtr_, :zupmtr_, ComplexF64))
+    relty = _realtype(elty)
     isnothing(hpr) || @eval begin
         # SUBROUTINE ZHPR(UPLO,N,ALPHA,X,INCX,AP)
         # *       .. Scalar Arguments ..
@@ -502,13 +503,13 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
         #    *     .. Array Arguments ..
         #          DOUBLE PRECISION   RWORK( * ), W( * )
         #          COMPLEX*16         AP( * ), WORK( * ), Z( LDZ, * )
-        function spev!(jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty}, W::PtrOrVec{$elty},
-            Z::PtrOrVec{$elty}, ldz::Integer, work::PtrOrVec{$elty}, rwork::PtrOrVec{$(_realtype(elty))})
+        function spev!(jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty}, W::PtrOrVec{$relty},
+            Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty}, rwork::PtrOrVec{$relty})
             chkuplo(uplo)
             info = Ref{BlasInt}()
             @blascall $spev(
                 jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, W::Ptr{$elty}, Z::Ptr{$elty},
-                ldz::Ref{BlasInt}, work::Ptr{$elty}, rwork::Ptr{$(_realtype(elty))}, info::Ref{BlasInt}, 1::Clong, 1::Clong
+                ldz::Ref{BlasInt}, work::Ptr{$elty}, rwork::Ptr{$relty}, info::Ref{BlasInt}, 1::Clong, 1::Clong
             )
             chklapackerror(info[])
             return W, Z
@@ -525,22 +526,20 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
         #          DOUBLE PRECISION   RWORK( * ), W( * )
         #          COMPLEX*16         AP( * ), WORK( * ), Z( LDZ, * )
         function spevx!(jobz::AbstractChar, range::AbstractChar, uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty},
-            vl::Union{Nothing,$(_realtype(elty))}, vu::Union{Nothing,$(_realtype(elty))}, il::Union{Nothing,<:Integer},
-            iu::Union{Nothing,<:Integer}, abstol::$(_realtype(elty)), W::PtrOrVec{$(_realtype(elty))},
-            Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty}, rwork::PtrOrVec{$(_realtype(elty))},
-            iwork::PtrOrVec{BlasInt}, ifail::PtrOrVec{BlasInt})
+            vl::Union{Nothing,$relty}, vu::Union{Nothing,$relty}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer},
+            abstol::$relty, W::PtrOrVec{$relty}, Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty},
+            rwork::PtrOrVec{$relty}, iwork::PtrOrVec{BlasInt}, ifail::PtrOrVec{BlasInt})
             chkuplo(uplo)
             m = Ref{BlasInt}()
             info = Ref{BlasInt}()
             @blascall $spevx(
                 jobz::Ref{UInt8}, range::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty},
-                (isnothing(vl) ? C_NULL : Ref(vl))::Ptr{$(_realtype(elty))},
-                (isnothing(vu) ? C_NULL : Ref(vu))::Ptr{$(_realtype(elty))},
+                (isnothing(vl) ? C_NULL : Ref(vl))::Ptr{$relty}, (isnothing(vu) ? C_NULL : Ref(vu))::Ptr{$relty},
                 (isnothing(il) ? C_NULL : Ref(BlasInt(il)))::Ptr{BlasInt},
                 (isnothing(iu) ? C_NULL : Ref(BlasInt(iu)))::Ptr{BlasInt},
-                abstol::Ref{$elty}, m::Ref{BlasInt}, W::Ptr{$(_realtype(elty))}, Z::Ptr{$elty}, ldz::Ref{BlasInt},
-                work::Ptr{$elty}, rwork::Ptr{$(_realtype(elty))}, iwork::Ptr{BlasInt}, ifail::Ptr{BlasInt},
-                info::Ref{BlasInt}, 1::Clong, 1::Clong, 1::Clong
+                abstol::Ref{$elty}, m::Ref{BlasInt}, W::Ptr{$relty}, Z::Ptr{$elty}, ldz::Ref{BlasInt},
+                work::Ptr{$elty}, rwork::Ptr{$relty}, iwork::Ptr{BlasInt}, ifail::Ptr{BlasInt}, info::Ref{BlasInt}, 1::Clong,
+                1::Clong, 1::Clong
             )
             chkargsok(info[])
             return m[], W, Z, info[], ifail
@@ -556,13 +555,13 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
         #          DOUBLE PRECISION   RWORK( * ), W( * )
         #          COMPLEX*16         AP( * ), WORK( * ), Z( LDZ, * )
         function spevd!(jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty},
-            W::PtrOrVec{$(_realtype(elty))}, Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty}, lwork::Integer,
-            rwork::PtrOrVec{$(_realtype(elty))}, lrwork::Integer, iwork::PtrOrVec{BlasInt}, liwork::Integer)
+            W::PtrOrVec{$relty}, Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty}, lwork::Integer,
+            rwork::PtrOrVec{$relty}, lrwork::Integer, iwork::PtrOrVec{BlasInt}, liwork::Integer)
             chkuplo(uplo)
             info = Ref{BlasInt}()
             @blascall $spevd(
-                jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, W::Ptr{$(_realtype(elty))}, Z::Ptr{$elty},
-                ldz::Ref{BlasInt}, work::Ptr{$elty}, lwork::Ref{BlasInt}, rwork::Ptr{$(_realtype(elty))}, lrwork::Ref{BlasInt},
+                jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, W::Ptr{$relty}, Z::Ptr{$elty},
+                ldz::Ref{BlasInt}, work::Ptr{$elty}, lwork::Ref{BlasInt}, rwork::Ptr{$relty}, lrwork::Ref{BlasInt},
                 iwork::Ptr{BlasInt}, liwork::Ref{BlasInt}, info::Ref{BlasInt}, 1::Clong, 1::Clong
             )
             chklapackerror(info[])
@@ -578,13 +577,13 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
         #          DOUBLE PRECISION   RWORK( * ), W( * )
         #          COMPLEX*16         AP( * ), BP( * ), WORK( * ), Z( LDZ, * )
         function spgv!(itype::Integer, jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty},
-            BP::PtrOrVec{$elty}, W::PtrOrVec{$elty}, Z::PtrOrVec{$elty}, ldz::Integer, work::PtrOrVec{$elty},
-            rwork::PtrOrVec{$(_realtype(elty))})
+            BP::PtrOrVec{$elty}, W::PtrOrVec{$relty}, Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty},
+            rwork::PtrOrVec{$relty})
             chkuplo(uplo)
             info = Ref{BlasInt}()
             @blascall $spgv(
                 itype::Ref{BlasInt}, jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, BP::Ptr{$elty},
-                W::Ptr{$elty}, Z::Ptr{$elty}, ldz::Ref{BlasInt}, work::Ptr{$elty}, rwork::Ptr{$(_realtype(elty))},
+                W::Ptr{$elty}, Z::Ptr{$elty}, ldz::Ref{BlasInt}, work::Ptr{$elty}, rwork::Ptr{$relty},
                 info::Ref{BlasInt}, 1::Clong, 1::Clong
             )
             chklapackerror(info[])
@@ -603,22 +602,22 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
         #          DOUBLE PRECISION   RWORK( * ), W( * )
         #          COMPLEX*16         AP( * ), BP( * ), WORK( * ), Z( LDZ, * )
         function spgvx!(itype::Integer, jobz::AbstractChar, range::AbstractChar, uplo::AbstractChar, n::Integer,
-            AP::PtrOrVec{$elty}, BP::PtrOrVec{$elty}, vl::Union{Nothing,$(_realtype(elty))},
-            vu::Union{Nothing,$(_realtype(elty))}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer},
-            abstol::$(_realtype(elty)), W::PtrOrVec{$(_realtype(elty))}, Z::PtrOrMat{$elty}, ldz::Integer,
-            work::PtrOrVec{$elty}, rwork::PtrOrVec{$(_realtype(elty))}, iwork::PtrOrVec{BlasInt}, ifail::PtrOrVec{BlasInt})
+            AP::PtrOrVec{$elty}, BP::PtrOrVec{$elty}, vl::Union{Nothing,$relty}, vu::Union{Nothing,$relty},
+            il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::$relty, W::PtrOrVec{$relty},
+            Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty}, rwork::PtrOrVec{$relty}, iwork::PtrOrVec{BlasInt},
+            ifail::PtrOrVec{BlasInt})
             chkuplo(uplo)
             m = Ref{BlasInt}()
             info = Ref{BlasInt}()
             @blascall $spgvx(
                 itype::Ref{BlasInt}, jobz::Ref{UInt8}, range::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty},
-                BP::Ptr{$elty}, (isnothing(vl) ? C_NULL : Ref(vl))::Ptr{$(_realtype(elty))},
-                (isnothing(vu) ? C_NULL : Ref(vu))::Ptr{$(_realtype(elty))},
+                BP::Ptr{$elty}, (isnothing(vl) ? C_NULL : Ref(vl))::Ptr{$relty},
+                (isnothing(vu) ? C_NULL : Ref(vu))::Ptr{$relty},
                 (isnothing(il) ? C_NULL : Ref(BlasInt(il)))::Ptr{BlasInt},
                 (isnothing(iu) ? C_NULL : Ref(BlasInt(iu)))::Ptr{BlasInt},
-                abstol::Ref{$elty}, m::Ref{BlasInt}, W::Ptr{$(_realtype(elty))}, Z::Ptr{$elty}, ldz::Ref{BlasInt},
-                work::Ptr{$elty}, rwork::Ptr{$(_realtype(elty))}, iwork::Ptr{BlasInt}, ifail::Ptr{BlasInt},
-                info::Ref{BlasInt}, 1::Clong, 1::Clong, 1::Clong
+                abstol::Ref{$elty}, m::Ref{BlasInt}, W::Ptr{$relty}, Z::Ptr{$elty}, ldz::Ref{BlasInt},
+                work::Ptr{$elty}, rwork::Ptr{$relty}, iwork::Ptr{BlasInt}, ifail::Ptr{BlasInt}, info::Ref{BlasInt}, 1::Clong,
+                1::Clong, 1::Clong
             )
             chkargsok(info[])
             return m[], W, Z, info[], ifail
@@ -634,15 +633,14 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
         #          DOUBLE PRECISION   RWORK( * ), W( * )
         #          COMPLEX*16         AP( * ), BP( * ), WORK( * ), Z( LDZ, * )
         function spgvd!(itype::Integer, jobz::AbstractChar, uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty},
-            BP::PtrOrVec{$elty}, W::PtrOrVec{$(_realtype(elty))}, Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty},
-            lwork::Integer, rwork::PtrOrVec{$(_realtype(elty))}, lrwork::Integer, iwork::PtrOrVec{BlasInt}, liwork::Integer)
+            BP::PtrOrVec{$elty}, W::PtrOrVec{$relty}, Z::PtrOrMat{$elty}, ldz::Integer, work::PtrOrVec{$elty},
+            lwork::Integer, rwork::PtrOrVec{$relty}, lrwork::Integer, iwork::PtrOrVec{BlasInt}, liwork::Integer)
             chkuplo(uplo)
             info = Ref{BlasInt}()
             @blascall $spgvd(
                 itype::Ref{BlasInt}, jobz::Ref{UInt8}, uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, BP::Ptr{$elty},
-                W::Ptr{$(_realtype(elty))}, Z::Ptr{$elty}, ldz::Ref{BlasInt}, work::Ptr{$elty}, lwork::Ref{BlasInt},
-                rwork::Ptr{$(_realtype(elty))}, lrwork::Ref{BlasInt}, iwork::Ptr{BlasInt}, liwork::Ref{BlasInt},
-                info::Ref{BlasInt}, 1::Clong, 1::Clong
+                W::Ptr{$relty}, Z::Ptr{$elty}, ldz::Ref{BlasInt}, work::Ptr{$elty}, lwork::Ref{BlasInt}, rwork::Ptr{$relty},
+                lrwork::Ref{BlasInt}, iwork::Ptr{BlasInt}, liwork::Ref{BlasInt}, info::Ref{BlasInt}, 1::Clong, 1::Clong
             )
             chklapackerror(info[])
             return W, Z
@@ -657,12 +655,12 @@ for (  hpr,     gemmt,    trttp,    tpttr,    pptrf,    pptrs,    pptri,    spsv
         # *     .. Array Arguments ..
         #       DOUBLE PRECISION   D( * ), E( * )
         #       COMPLEX*16         AP( * ), TAU( * )
-        function hptrd!(uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty}, D::PtrOrVec{$(_realtype(elty))},
-            E::PtrOrVec{$(_realtype(elty))}, τ::PtrOrVec{$elty})
+        function hptrd!(uplo::AbstractChar, n::Integer, AP::PtrOrVec{$elty}, D::PtrOrVec{$relty}, E::PtrOrVec{$relty},
+            τ::PtrOrVec{$elty})
             chkuplo(uplo)
             info = Ref{BlasInt}()
             @blascall $hptrd(
-                uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, D::Ptr{$(_realtype(elty))}, E::Ptr{$(_realtype(elty))},
+                uplo::Ref{UInt8}, n::Ref{BlasInt}, AP::Ptr{$elty}, D::Ptr{$relty}, E::Ptr{$relty},
                 τ::Ptr{$elty}, info::Ref{BlasInt}, 1::Clong
             )
             chklapackerror(info[])
@@ -1200,7 +1198,7 @@ end
     end
     PM <: PackedMatrixScaled && rmul_diags!(AP, scalefac)
     evs, _ = spev!('N', uplo, n, APv, W, Ptr{T}(C_NULL), 1, work, rwork)
-    return PM <: PackedMatrixScaled && rmul!(evs, inv(scalefac)) : evs
+    return PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs
 end
 
 @pmalso :diagscale function spev!(::Val{:V}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{R},Missing}=missing,
@@ -1451,7 +1449,7 @@ end
         chkstride1(W)
     end
     if ismissing(Z)
-        Z = Matrix{R}(undef, n, range == 'I' ? iu - il + 1 : n)
+        Z = Matrix{T}(undef, n, range == 'I' ? iu - il + 1 : n)
     else
         size(Z, 1) == n || throw(DimensionMismatch("Z has first dimension $(size(Z, 1)), but needs $n"))
         if range == 'A'
@@ -1499,7 +1497,7 @@ end
     m, _, _, info, _ = spevx!('V', range, uplo, n, APv, vl, vu, il, iu, abstol, W, Z, max(1, stride(Z, 2)), work, rwork, iwork,
         ifail)
     return (PM <: PackedMatrixScaled ? rmul!(@view(W[1:m]), inv(scalefac)) : @view(W[1:m])),
-        @view(Z[:, 1:m]), info, @view(ifail[])
+        @view(Z[:, 1:m]), info, @view(ifail[1:m])
 end
 
 """
@@ -2130,7 +2128,7 @@ end
     end
     m, _, _, info, _ = spgvx!(itype, 'V', range, uplo, n, APv, BPv, vl, vu, il, iu, abstol, W, Z, max(1, stride(Z, 2)), work,
         rwork, iwork, ifail)
-    return @view(W[1:m]), @view(Z[:, 1:m]), info, @view(ifail[]), BP
+    return @view(W[1:m]), @view(Z[:, 1:m]), info, @view(ifail[1:m]), BP
 end
 
 """

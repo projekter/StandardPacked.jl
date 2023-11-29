@@ -206,7 +206,7 @@ Base.@propagate_inbounds function Base.setindex!(P::PackedMatrix{R,V,:US}, X, ro
     elseif row == col
         P.data[@inbounds rowcol_to_vec(P, row, col)] = X
     else
-        P.data[@inbounds rowcol_to_vec(P, col, row)] = sqrt(R(2)) * X
+        P.data[@inbounds rowcol_to_vec(P, col, row)] = sqrt(R(2)) * conj(X)
     end
     return X
 end
@@ -224,7 +224,7 @@ Base.@propagate_inbounds function Base.setindex!(P::PackedMatrix{R,V,:LS}, X, ro
     elseif row == col
         P.data[@inbounds rowcol_to_vec(P, row, col)] = X
     else
-        P.data[@inbounds rowcol_to_vec(P, col, row)] = sqrt(R(2)) * X
+        P.data[@inbounds rowcol_to_vec(P, col, row)] = sqrt(R(2)) * conj(X)
     end
     return X
 end
@@ -348,7 +348,7 @@ end
 Construct a dense matrix from a packed matrix. The parameter `symmetric` determines which kind of view is returned. Use
 `convert(Matrix{R}, PackedMatrix{R})` to return the matrix itself.
 """
-Base.Matrix{R}(P::PackedMatrix{R}, viewtype=R isa Complex ? Hermitian : Symmetric) where {R} =
+Base.Matrix{R}(P::PackedMatrix{R}, viewtype=R <: Complex ? Hermitian : Symmetric) where {R} =
     viewtype(convert(Matrix{R}, P), packed_isupper(P) ? :U : :L)
 """
     PackedMatrix(A::Union{<:Hermitian,<:Symmetric})
