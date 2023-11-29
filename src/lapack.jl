@@ -1955,9 +1955,9 @@ spgvx!(itype::Integer, jobz::Val, uplo::AbstractChar, AP::PM, BP::PM) where {PM<
 
 @pmalso :unscale function spgvx!(itype::Integer, ::Val{:N}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
     vl::Union{Nothing,T}, vu::Union{Nothing,T}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer},
-    abstol::T, W::Union{<:AbstractVector{R},Missing}=missing,
+    abstol::T, W::Union{<:AbstractVector{T},Missing}=missing,
     work::Union{<:AbstractVector{T},Missing}=missing,
-    iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {R<:BlasReal,T<:Complex{R}}
+    iwork::Union{<:AbstractVector{BlasInt},Missing}=missing) where {T<:BlasReal}
     @nospecialize vl vu il iu
     require_one_based_indexing(APv, BPv)
     chkstride1(APv, BPv)
@@ -2288,9 +2288,9 @@ end
         chkstride1(Z)
     end
     if ismissing(work)
-        work = Vector{T}(undef, n ≤ 1 ? 1 : n^2 + 6n +1)
+        work = Vector{T}(undef, n ≤ 1 ? 1 : 2n^2 + 6n +1)
     else
-        length(work) < (n ≤ 1 ? 1 : n^2 + 6n +1) && throw(ArgumentError("The provided work space was too small"))
+        length(work) < (n ≤ 1 ? 1 : 2n^2 + 6n +1) && throw(ArgumentError("The provided work space was too small"))
         require_one_based_indexing(work)
         chkstride1(work)
     end
@@ -2410,13 +2410,13 @@ end
 
 """
     spgvd!(itype, 'N', uplo, AP::AbstractVector, BP::AbstractVector, W=missing,
-        work=missing[, rwork=missing], iwork=missing) -> W
+        work=missing[, rwork=missing], iwork=missing) -> (W, BP)
     spgvd!(itype, 'N', AP::PackedMatrix, BP::PackedMatrix, W=missing, work=missing
-        [, rwork=missing], iwork=missing) -> W
+        [, rwork=missing], iwork=missing) -> (W, BP)
     spgvd!(itype, 'V', uplo, AP::AbstractVector, BP::AbstractVector, W=missing, Z=missing,
-        work=missing[, rwork=missing], iwork=missing) -> (W, Z)
+        work=missing[, rwork=missing], iwork=missing) -> (W, Z, BP)
     spgvd!(itype, 'V', AP::PackedMatrix, BP::PackedMatrix, W=missing, Z=missing,
-        work=missing[, rwork=missing], iwork=missing) -> (W, Z)
+        work=missing[, rwork=missing], iwork=missing) -> (W, Z, BP)
 
 Finds the generalized eigenvalues (second parameter `'N'`) or eigenvalues and eigenvectors (second parameter `'V'`) of a
 Hermitian matrix ``A`` in packed storage `AP` and Hermitian positive-definite matrix ``B`` in packed storage `BP`.
