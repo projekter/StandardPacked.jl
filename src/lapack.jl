@@ -1,20 +1,8 @@
 using Base: require_one_based_indexing, _realtype
 using LinearAlgebra: BlasReal, BlasComplex, BlasFloat, BlasInt, DimensionMismatch, checksquare, chkstride1
-using LinearAlgebra.BLAS: libblastrampoline, @blasfunc
-import LinearAlgebra.BLAS: spmv!, hpmv!
+using LinearAlgebra.BLAS: libblastrampoline, @blasfunc, chkuplo
+import LinearAlgebra.BLAS: spmv!, hpmv!, spr!
 using LinearAlgebra.LAPACK: chklapackerror, chkargsok, chknonsingular
-
-if VERSION ≥ v"1.8"
-    using LinearAlgebra.BLAS: chkuplo
-    import LinearAlgebra.BLAS: spr!
-else
-    function chkuplo(uplo::AbstractChar)
-        if !(uplo == 'U' || uplo == 'L')
-            throw(ArgumentError("uplo argument must be 'U' (upper) or 'L' (lower), got $uplo"))
-        end
-        uplo
-    end
-end
 
 export spmv!, hpmv!, spr!, hpr!,
     gemmt!,
@@ -26,7 +14,7 @@ export spmv!, hpmv!, spr!, hpr!,
 # - Hermitian matrix-vector multiply:         sspmv,  dspmv,  chpmv,  zhpmv  (Base: spmv!, hpmv!)
 # - symmetric complex matrix-vector multiply:                 cspmv,  zspmv  (not implemented)
 # - triangular matrix-vector multiply:        stpmv,  dtpmv,  ctpmv,  ztpmv  (not implemented)
-# - rank-1 update:                            sspr,   dspr                   (Base: spr! for Julia ≥ 1.8, else: here)
+# - rank-1 update:                            sspr,   dspr                   (Base: spr!)
 #                                                             chpr,   zhpr   (here: hpr!)
 # - symmetric complex rank-1 update:                          cspr,   zspr   (not implemented)
 # - rank-2 update:                            sspr2,  dspr2,  chpr2,  zhpr2  (not implemented)
@@ -812,67 +800,20 @@ hpmv!(α::Number, AP::PackedMatrixUnscaled, args...) = hpmv!(packed_ulchar(AP), 
     "    hpmv!(uplo, α, AP, x, β, y)" => "    hpmv!(uplo, α, AP::AbstractVector, x, β, y)
     hpmv!(α, AP::PackedMatrixUnscaled, x, β, y)") hpmv!
 
-if VERSION ≥ v"1.8"
-    function spr!(α::Real, x::AbstractArray{T}, AP::PackedMatrix{T}) where {T<:BlasReal}
-        AP = packed_unscale!(AP)
-        spr!(packed_ulchar(AP), α, x, vec(AP))
-        return AP
-    end
-    @doc (replace(@doc(spr!).meta[:results][1].text[1],
-        "    spr!(uplo, α, x, AP)" => "    spr!(uplo, α, x, AP::AbstractVector)
-        spr!(α, x, AP::PackedMatrix)") * warnunscale) spr!
-else
-    for (spr, elty) in ((:sspr_, Float32), (:dspr_, Float64))
-        @eval begin
-            function spr!(uplo::AbstractChar, n::Integer, α::$elty, x::PtrOrVec{$elty}, incx::Integer, AP::PtrOrVec{$elty})
-                chkuplo(uplo)
-                @blascall $spr(
-                    uplo::Ref{UInt8}, n::Ref{BlasInt}, α::Ref{$elty}, x::Ptr{$elty}, incx::Ref{BlasInt}, AP::Ptr{$elty},
-                    1::Clong
-                )
-                return AP
-            end
-        end
-    end
-
-    @pmalso :unscale function spr!(uplo::AbstractChar, α::Real, x::AbstractArray{T}, AP::PM{T}) where {T<:BlasReal}
-        require_one_based_indexing(APv, x)
-        N = length(x)
-        2length(AP) < N*(N + 1) ||
-            throw(DimensionMismatch("Packed symmetric matrix A has size smaller than length(x) = $(N)."))
-        chkstride1(APv)
-        px, stx = vec_pointer_stride(x, ArgumentError("input vector with 0 stride is not allowed"))
-        PM <: PackedMatrixScaled && (AP = packed_unscale!(AP))
-        GC.@preserve x spr!(uplo, N, T(α), px, stx , APv)
-        return AP
-    end
-
-"""
-    spr!(uplo, α, x, AP::AbstractVector)
-    spr!(α, x, AP::PackedMatrix)
-
-Update matrix ``A`` as ``A + \\alpha x x'``, where ``A`` is a symmetric matrix provided in packed format `AP` and `x` is a
-vector.
-
-With `uplo = 'U'`, the vector `AP` must contain the upper triangular part of the Hermitian matrix packed sequentially, column
-by column, so that `AP[1]` contains `A[1, 1]`, `AP[2]` and `AP[3]` contain `A[1, 2]` and `A[2, 2]` respectively, and so on.
-
-With `uplo = 'L'`, the vector `AP` must contain the lower triangular part of the symmetric matrix packed sequentially, column
-by column, so that `AP[1]` contains `A[1, 1]`, `AP[2]` and `AP[3]` contain `A[2, 1]` and `A[3, 1]` respectively, and so on.
-
-The scalar input `α` must be real.
-
-The array inputs `x` and `AP` must all be of `Float32` or `Float64` type. Return the updated `AP`.
-$warnunscale
-"""
-    spr!
+function spr!(α::Real, x::AbstractArray{T}, AP::PackedMatrix{T}) where {T<:BlasReal}
+    AP = packed_unscale!(AP)
+    spr!(packed_ulchar(AP), α, x, vec(AP))
+    return AP
 end
+@doc (replace(@doc(spr!).meta[:results][1].text[1],
+    "    spr!(uplo, α, x, AP)" => "    spr!(uplo, α, x, AP::AbstractVector)
+    spr!(α, x, AP::PackedMatrix)") * warnunscale) spr!
 
 @pmalso :unscale function hpr!(uplo::AbstractChar, α::Real, x::AbstractVector{T}, AP::PM{T}) where {T<:BlasComplex}
     require_one_based_indexing(APv, x)
     N = length(x)
     2length(APv) ≥ N*(N + 1) ||
-        throw(DimensionMismatch("Packed symmetric matrix A has size smaller than length(x) = $(N)."))
+        throw(DimensionMismatch(lazy"Packed symmetric matrix A has size smaller than length(x) = $(N)."))
     chkstride1(APv)
     px, stx = vec_pointer_stride(x, ArgumentError("input vector with 0 stride is not allowed"))
     PM <: PackedMatrixScaled && (AP = packed_unscale!(AP))

@@ -167,7 +167,7 @@ end
             end
             fill!(pmc, zero(elty))
             pmc[diagind(pmc)] .= elty.(3:9)
-            pmcs = PackedMatrix(n, SparseVector{elty,Int}(undef, packedsize(n)), fmt)
+            pmcs = PackedMatrix(n, SparseVector{elty,Int}(packedsize(n), Int[], elty[]), fmt)
             pmcs[diagind(pmcs)] .= elty.(3:9)
             @test dot(pm, pmc) ≈ 19.034233988404225 rtol=2eps(elty)
             @test dot(pm, pmcs) ≈ 19.034233988404225 rtol=2eps(elty)
