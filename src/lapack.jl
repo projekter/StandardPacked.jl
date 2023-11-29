@@ -1261,8 +1261,10 @@ save allocations.
 spev!
 
 spevx!(jobz::AbstractChar, args...) = spevx!(Val(Symbol(jobz)), args...)
-spevx!(jobz::Val, uplo::AbstractChar, AP::Union{<:AbstractVector,<:PackedMatrix}) =
-    spevx!(jobz, 'A', uplo, AP, nothing, nothing, nothing, nothing, _realtype(T)(-1))
+spevx!(jobz::Val, uplo::AbstractChar, AP::AbstractVector) =
+    spevx!(jobz, 'A', uplo, AP, nothing, nothing, nothing, nothing, _realtype(eltype(AP))(-1))
+spevx!(jobz::Val, AP::PackedMatrix) =
+    spevx!(jobz, 'A', AP, nothing, nothing, nothing, nothing, _realtype(eltype(AP))(-1))
 
 @pmalso :diagscale function spevx!(::Val{:N}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, vl::Union{Nothing,T},
     vu::Union{Nothing,T}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer}, abstol::T,
@@ -1891,8 +1893,10 @@ $warnunscale
 spgv!
 
 spgvx!(itype::Integer, jobz::AbstractChar, args...) = spgvx!(itype, Val(Symbol(jobz)), args...)
-spgvx!(itype::Integer, jobz::Val, uplo::AbstractChar, AP::PM, BP::PM) where {PM<:Union{<:AbstractVector,<:PackedMatrix}} =
-    spgvx!(itype, jobz, 'A', uplo, AP, BP, nothing, nothing, nothing, nothing, _realtype(T)(-1))
+spgvx!(itype::Integer, jobz::Val, uplo::AbstractChar, AP::PM, BP::PM) where {PM<:AbstractVector} =
+    spgvx!(itype, jobz, 'A', uplo, AP, BP, nothing, nothing, nothing, nothing, _realtype(eltype(AP))(-1))
+spgvx!(itype::Integer, jobz::Val, AP::PM, BP::PM) where {PM<:PackedMatrix} =
+    spgvx!(itype, jobz, 'A', AP, BP, nothing, nothing, nothing, nothing, _realtype(eltype(AP))(-1))
 
 @pmalso :unscale function spgvx!(itype::Integer, ::Val{:N}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
     vl::Union{Nothing,T}, vu::Union{Nothing,T}, il::Union{Nothing,<:Integer}, iu::Union{Nothing,<:Integer},

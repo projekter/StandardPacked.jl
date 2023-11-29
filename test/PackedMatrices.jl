@@ -216,6 +216,23 @@ end
                 @test eigmax(pm) ≈ maximum(es.values)
                 @test eigvecs(pm) == es.vectors
 
+                # functions that are not called by the LinearAlgebra interface
+                @test spev!('N', copy(pm)) ≈ es.values
+                let newev=spev!('V', copy(pm))
+                    @test newev[1] ≈ es.values
+                    @test newev[2] ≈ es.vectors
+                end
+                @test spevx!('N', copy(pm)) ≈ es.values
+                @test spevx!('N', PackedMatrices.packed_ulchar(pm), vec(packed_unscale!(copy(pm)))) ≈ es.values
+                let newev=spevx!('V', copy(pm))
+                    @test newev[1] ≈ es.values
+                    @test newev[2] ≈ es.vectors
+                end
+                let newev=spevx!('V', PackedMatrices.packed_ulchar(pm), vec(packed_unscale!(copy(pm))))
+                    @test newev[1] ≈ es.values
+                    @test newev[2] ≈ es.vectors
+                end
+
                 # check pre-allocated routines (eigenvalues only)
                 # spevd
                 @test_throws DimensionMismatch eigvals!(pm, Vector{elty}(undef, n +1))
@@ -339,6 +356,25 @@ end
                 @test es3[1] ≈ @view(es.values[3:5]) rtol=16eps(elty)
                 for (checkvec, refvec) in zip(eachcol(es3[2]), eachcol(@view(es.vectors[:, 3:5])))
                     @test ≈(checkvec, refvec, atol=16eps(elty)) || ≈(checkvec, -refvec, atol=16eps(elty))
+                end
+
+                # functions that are not called by the LinearAlgebra interface
+                @test spgv!(1, 'N', copy(pm), copy(pmb))[1] ≈ es.values
+                let newev=spgv!(1, 'V', copy(pm), copy(pmb))
+                    @test newev[1] ≈ es.values
+                    @test newev[2] ≈ es.vectors
+                end
+                @test spgvx!(1, 'N', copy(pm), copy(pmb))[1] ≈ es.values
+                @test spgvx!(1, 'N', PackedMatrices.packed_ulchar(pm), vec(packed_unscale!(copy(pm))),
+                    vec(packed_unscale!(copy(pmb))))[1] ≈ es.values
+                let newev=spgvx!(1, 'V', copy(pm), copy(pmb))
+                    @test newev[1] ≈ es.values
+                    @test newev[2] ≈ es.vectors
+                end
+                let newev=spgvx!(1, 'V', PackedMatrices.packed_ulchar(pm), vec(packed_unscale!(copy(pm))),
+                        vec(packed_unscale!(copy(pmb))))
+                    @test newev[1] ≈ es.values
+                    @test newev[2] ≈ es.vectors
                 end
 
                 # check pre-allocated routines (eigenvalues only)
