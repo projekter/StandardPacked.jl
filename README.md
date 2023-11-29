@@ -1,11 +1,11 @@
-# PackedMatrices.jl
+# StandardPacked.jl
 
-[![](https://img.shields.io/badge/docs-stable-blue.svg)](https://projekter.github.io/PackedMatrices.jl/stable)
-[![](https://img.shields.io/badge/docs-dev-blue.svg)](https://projekter.github.io/PackedMatrices.jl/dev)
-[![Build status (Github Actions)](https://github.com/projekter/PackedMatrices.jl/workflows/CI/badge.svg)](https://github.com/projekter/PackedMatrices.jl/actions)
-[![codecov.io](http://codecov.io/github/projekter/PackedMatrices.jl/coverage.svg?branch=main)](http://codecov.io/github/projekter/PackedMatrices.jl?branch=main)
+[![](https://img.shields.io/badge/docs-stable-blue.svg)](https://projekter.github.io/StandardPacked.jl/stable)
+[![](https://img.shields.io/badge/docs-dev-blue.svg)](https://projekter.github.io/StandardPacked.jl/dev)
+[![Build status (Github Actions)](https://github.com/projekter/StandardPacked.jl/workflows/CI/badge.svg)](https://github.com/projekter/StandardPacked.jl/actions)
+[![codecov.io](http://codecov.io/github/projekter/StandardPacked.jl/coverage.svg?branch=main)](http://codecov.io/github/projekter/StandardPacked.jl?branch=main)
 
-`PackedMatrices` is a Julia package that wraps functions for storing symmetric matrices in their packed form, i.e.,
+`StandardPacked` is a Julia package that wraps functions for storing symmetric matrices in their packed form, i.e.,
 column-wise stacked upper or lower triangles. It also provides bindings for the corresponding LAPACK functions, which allow
 things such as eigendecompositions. Note that typically, the packed form requires a bit longer calculation times and is
 slightly more imprecise than the dense form; however, it requires less storage.

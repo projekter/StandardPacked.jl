@@ -1,4 +1,4 @@
-name = "PackedMatrices"
+name = "StandardPacked"
 uuid = "65f29c17-9e56-4606-972f-81e04007695c"
 authors = ["Benjamin Desef <projekter-git@yahoo.de>"]
 version = "1.0.0"

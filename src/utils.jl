@@ -12,12 +12,12 @@ Calculates the number of unique entries in a symmetric matrix `A` with side dime
 chkpacked(n::Integer, fullsize::Integer) = 2fullsize == n * (n +1) ||
     throw(DimensionMismatch("Packed storage length does not match dimension"))
 @inline chkpacked(n::Integer, AP::AbstractVector) = chkpacked(n, length(AP))
-@inline chkpacked(n::Integer, P::PackedMatrix) = n == P.dim ||
+@inline chkpacked(n::Integer, P::SPMatrix) = n == P.dim ||
     throw(DimensionMismatch("Packed storage length does not match dimension"))
 @doc raw"""
     packedside(fullsize::Integer)
     packedside(AP::AbstractVector)
-    packedside(P::PackedMatrix)
+    packedside(P::SPMatrix)
 
 Calculates the side dimension of a vector `AP` of size `fullside` representing a symmetric packed matrix,
 ``\frac{\sqrt{8\mathit{fullsize} -1}}{2}``.
@@ -28,20 +28,20 @@ Calculates the side dimension of a vector `AP` of size `fullside` representing a
     return n
 end
 Base.@propagate_inbounds packedside(AP::AbstractVector) = packedside(length(AP))
-packedside(P::PackedMatrix) = P.dim
+packedside(P::SPMatrix) = P.dim
 
 
-@inline function rowcol_to_vec(P::PackedMatrixUpper, row, col)
+@inline function rowcol_to_vec(P::SPMatrixUpper, row, col)
     @boundscheck(1 ≤ row ≤ col || throw(BoundsError(P, (row, col))))
     return col * (col -1) ÷ 2 + row
 end
-@inline function rowcol_to_vec(P::PackedMatrixLower, row, col)
+@inline function rowcol_to_vec(P::SPMatrixLower, row, col)
     @boundscheck(1 ≤ col ≤ row || throw(BoundsError(P, (row, col))))
     return (2P.dim - col) * (col -1) ÷ 2 + row
 end
 
 """
-    PackedDiagonalIterator(P::PackedMatrix, k=0)
+    PackedDiagonalIterator(P::SPMatrix, k=0)
     PackedDiagonalIterator(fmt::Symbol, dim, k=0)
 
 Creates an iterator that returns the linear indices for iterating through the `k`th diagonal of a packed matrix.
@@ -49,8 +49,8 @@ Creates an iterator that returns the linear indices for iterating through the `k
 struct PackedDiagonalIterator{Fmt}
     dim::Int
     k::UInt
-    PackedDiagonalIterator(P::PackedMatrixUpper, k=0) = new{:U}(P.dim, abs(k))
-    PackedDiagonalIterator(P::PackedMatrixLower, k=0) = new{:L}(P.dim, abs(k))
+    PackedDiagonalIterator(P::SPMatrixUpper, k=0) = new{:U}(P.dim, abs(k))
+    PackedDiagonalIterator(P::SPMatrixLower, k=0) = new{:L}(P.dim, abs(k))
     function PackedDiagonalIterator(fmt::Symbol, dim, k=0)
         fmt === :U || fmt === :L || error("Invalid symbol for diagonal iterator construction")
         new{fmt}(dim, abs(k))
@@ -97,13 +97,13 @@ Base.length(iter::PackedDiagonalIterator) = iter.dim - iter.k
 
 
 """
-    rmul_diags!(P::PackedMatrix, factor)
+    rmul_diags!(P::SPMatrix, factor)
 
 Right-multiplies all diagonal entries in `P` by `factor`. Returns `P`.
 
 See also [`lmul_diags!`](@ref), [`rmul_offdiags!`](@ref), [`lmul_offdiags!`](@ref).
 """
-function rmul_diags!(P::PackedMatrix, factor)
+function rmul_diags!(P::SPMatrix, factor)
     data = P.data
     for i in PackedDiagonalIterator(P)
         @inbounds data[i] = data[i] * factor
@@ -111,13 +111,13 @@ function rmul_diags!(P::PackedMatrix, factor)
     return P
 end
 """
-    rmul_offdiags!(P::PackedMatrix, factor)
+    rmul_offdiags!(P::SPMatrix, factor)
 
 Right-multiplies all off-diagonal entries in `P` by `factor`. Returns `P`.
 
 See also [`rmul_diags!`](@ref), [`lmul_diags!`](@ref), [`lmul_offdiags!`](@ref).
 """
-function rmul_offdiags!(P::PackedMatrix, factor)
+function rmul_offdiags!(P::SPMatrix, factor)
     diags = PackedDiagonalIterator(P)
     data = P.data
     for (d₁, d₂) in zip(diags, Iterators.drop(diags, 1))
@@ -126,13 +126,13 @@ function rmul_offdiags!(P::PackedMatrix, factor)
     return P
 end
 """
-    lmul_diags!(factor, P::PackedMatrix)
+    lmul_diags!(factor, P::SPMatrix)
 
 Left-multiplies all diagonal entries in `P` by `factor`. Returns `P`.
 
 See also [`rmul_diags!`](@ref), [`rmul_offdiags!`](@ref), [`lmul_offdiags!`](@ref).
 """
-function lmul_diags!(factor, P::PackedMatrix)
+function lmul_diags!(factor, P::SPMatrix)
     data = P.data
     for i in PackedDiagonalIterator(P)
         @inbounds data[i] = factor * data[i]
@@ -140,13 +140,13 @@ function lmul_diags!(factor, P::PackedMatrix)
     return P
 end
 """
-    lmul_offdiags!(factor, P::PackedMatrix)
+    lmul_offdiags!(factor, P::SPMatrix)
 
 Left-multiplies all diagonal entries in `P` by `factor`. Returns `P`.
 
 See also [`rmul_diags!`](@ref), [`rmul_offdiags!`](@ref), [`lmul_diags!`](@ref).
 """
-function lmul_offdiags!(factor, P::PackedMatrix)
+function lmul_offdiags!(factor, P::SPMatrix)
     diags = PackedDiagonalIterator(P)
     data = P.data
     for (d₁, d₂) in zip(diags, Iterators.drop(diags, 1))

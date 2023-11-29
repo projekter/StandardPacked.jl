@@ -1,10 +1,10 @@
 # BLAS and LAPACK reference
 
 ```@meta
-CurrentModule = PackedMatrices
+CurrentModule = StandardPacked
 ```
 
-`PackedMatrices.jl` makes several BLAS and LAPACK functions related to packed matrices available that are not provided by Base.
+`StandardPacked.jl` makes several BLAS and LAPACK functions related to packed matrices available that are not provided by Base.
 
 !!! note "Coverage"
     The general rule of thumb is: Whenever a function is provided in Base for general matrices, this package makes its packed
@@ -28,9 +28,9 @@ CurrentModule = PackedMatrices
     whether the `uplo` parameter is correct plus a check of the return value. This raw version is usually not made available
     directly by the Julia Base.
 
-    Additionally, `PackedMatrices.jl` provide a convenience wrapper that works with the `AbstractArray` interface,
+    Additionally, `StandardPacked.jl` provide a convenience wrapper that works with the `AbstractArray` interface,
     automatically infers dimensions and checks for the compatibility of all the sizes - this is what is commonly provided by
-    Julia. And finally, the vector representing the packed matrix can also be replaced by a [`PackedMatrixUnscaled`](@ref) -
+    Julia. And finally, the vector representing the packed matrix can also be replaced by a [`SPMatrixUnscaled`](@ref) -
     then, the `uplo` argument is not present, as it is determined from the type.
 
 !!! tip "Performance"
@@ -43,7 +43,7 @@ CurrentModule = PackedMatrices
     compiling the correct version.
 
 ## BLAS Level 2
-Some of these functions are already present in `Base.BLAS` and are re-exported in `PackedMatrices`. They are listed here for
+Some of these functions are already present in `Base.BLAS` and are re-exported in `StandardPacked`. They are listed here for
 completeness only.
 ```@docs
 spmv!

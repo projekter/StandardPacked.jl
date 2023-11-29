@@ -108,7 +108,7 @@ end
 const warnunscale = """
 
 !!! warning "Scaled matrices"
-    The variant of this function that takes a [`PackedMatrix`](@ref) also allows for scaled packed matrices. It will
+    The variant of this function that takes a [`SPMatrix`](@ref) also allows for scaled packed matrices. It will
     automatically call [`packed_unscale!`](@ref) on the matrix and return the unscaled result. Do not use the reference to the
     scaled matrix any more, only the result of this function!
 """
@@ -719,12 +719,12 @@ macro pmalso(scaled, fun=nothing)
     # fun is a function definition that contains uplo and a PM-typed parameter. We rewrite this into two function definitions:
     # - one where we replace all PM{T} by PM and add where {PM<:AbstractVector{T}}
     # - one where we remove the uplo parameter, and introduce the uplo variable
-    #   if scaled === :disallow: replace all PM{T} by PM and add where {PM<:PackedMatrixUnscaled{T}}
-    #   if scaled === :unscale: replace all PM{T} by PM and add where {PM<:PackedMatrix{T}}. Method should do packed_unscale!
+    #   if scaled === :disallow: replace all PM{T} by PM and add where {PM<:SPMatrixUnscaled{T}}
+    #   if scaled === :unscale: replace all PM{T} by PM and add where {PM<:SPMatrix{T}}. Method should do packed_unscale!
     #                           somewhere
-    #   if scaled === :diagscale: replace all PM{T} by PM, add where {PM<:PackedMatrix{T}}, and set the variable
+    #   if scaled === :diagscale: replace all PM{T} by PM, add where {PM<:SPMatrix{T}}, and set the variable
     #                             scalefac = sqrt(T(2)) if appropriate. Method should do
-    #                             PM <: PackedMatrixScaled && rmul_diags!(, scalefac) somewhere
+    #                             PM <: SPMatrixScaled && rmul_diags!(, scalefac) somewhere
     #   if scaled === :ignore, just allow all packed matrices without anything to add
     # In all functions, we also add the variables ...v for the vec() of the packed matrices (or the objects themselves).
     @assert(fun.head === :function && fun.args[2].head === :block)
@@ -768,7 +768,7 @@ macro pmalso(scaled, fun=nothing)
         end
     end
     # in the second function definition, introduce a new where capture
-    supertype = scaled ∈ (:disallow, :ignore) ? :PackedMatrixUnscaled : :PackedMatrix
+    supertype = scaled ∈ (:disallow, :ignore) ? :SPMatrixUnscaled : :SPMatrix
     fncallparent.args[1] = Expr(:where, fncall, isnothing(commontype) ? :(PM<:AbstractVector) :
                                                                         :(PM<:AbstractVector{$commontype}))
     fncall2parent.args[1] = Expr(:where, fncall2, isnothing(commontype) ? :(PM<:$supertype) :
@@ -776,7 +776,7 @@ macro pmalso(scaled, fun=nothing)
     # in the second function definition, make the variable uplo available
     if scaled === :diagscale
         pushfirst!(fun2.args[2].args, :(
-            if PM <: PackedMatrixScaled
+            if PM <: SPMatrixScaled
                 scalefac = sqrt($(isnothing(commontype) ? :2 : :(_realtype($commontype)(2))))
             end
         ))
@@ -788,24 +788,24 @@ macro pmalso(scaled, fun=nothing)
     end)
 end
 
-spmv!(α::Real, AP::PackedMatrixUnscaled, args...) = spmv!(packed_ulchar(AP), α, vec(AP), args...)
+spmv!(α::Real, AP::SPMatrixUnscaled, args...) = spmv!(packed_ulchar(AP), α, vec(AP), args...)
 @doc replace(@doc(spmv!).meta[:results][1].text[1],
     "    spmv!(uplo, α, AP, x, β, y)" => "    spmv!(uplo, α, AP::AbstractVector, x, β, y)
-    spmv!(α, AP::PackedMatrixUnscaled, x, β, y)") spmv!
+    spmv!(α, AP::SPMatrixUnscaled, x, β, y)") spmv!
 
-hpmv!(α::Number, AP::PackedMatrixUnscaled, args...) = hpmv!(packed_ulchar(AP), α, vec(AP), args...)
+hpmv!(α::Number, AP::SPMatrixUnscaled, args...) = hpmv!(packed_ulchar(AP), α, vec(AP), args...)
 @doc replace(@doc(spmv!).meta[:results][1].text[1],
     "    hpmv!(uplo, α, AP, x, β, y)" => "    hpmv!(uplo, α, AP::AbstractVector, x, β, y)
-    hpmv!(α, AP::PackedMatrixUnscaled, x, β, y)") hpmv!
+    hpmv!(α, AP::SPMatrixUnscaled, x, β, y)") hpmv!
 
-function spr!(α::Real, x::AbstractArray{T}, AP::PackedMatrix{T}) where {T<:BlasReal}
+function spr!(α::Real, x::AbstractArray{T}, AP::SPMatrix{T}) where {T<:BlasReal}
     AP = packed_unscale!(AP)
     spr!(packed_ulchar(AP), α, x, vec(AP))
     return AP
 end
 @doc (replace(@doc(spr!).meta[:results][1].text[1],
     "    spr!(uplo, α, x, AP)" => "    spr!(uplo, α, x, AP::AbstractVector)
-    spr!(α, x, AP::PackedMatrix)") * warnunscale) spr!
+    spr!(α, x, AP::SPMatrix)") * warnunscale) spr!
 
 @pmalso :unscale function hpr!(uplo::AbstractChar, α::Real, x::AbstractVector{T}, AP::PM{T}) where {T<:BlasComplex}
     require_one_based_indexing(APv, x)
@@ -814,14 +814,14 @@ end
         throw(DimensionMismatch(lazy"Packed symmetric matrix A has size smaller than length(x) = $(N)."))
     chkstride1(APv)
     px, stx = vec_pointer_stride(x, ArgumentError("input vector with 0 stride is not allowed"))
-    PM <: PackedMatrixScaled && (AP = packed_unscale!(AP))
+    PM <: SPMatrixScaled && (AP = packed_unscale!(AP))
     GC.@preserve x hpr!(uplo, N, T(α), px, stx, APv)
     return AP
 end
 
 """
     hpr!(uplo, α, x, AP::AbstractVector)
-    hpr!(α, x, AP::PackedMatrix)
+    hpr!(α, x, AP::SPMatrix)
 
 Update matrix ``A`` as ``A + \\alpha x x'``, where ``A`` is a Hermitian matrix provided in packed format `AP` and `x` is a
 vector.
@@ -881,7 +881,7 @@ end
 
 """
     trttp!(uplo, A, AP::AbstractVector)
-    trttp!(A, AP::PackedMatrixUnscaled)
+    trttp!(A, AP::SPMatrixUnscaled)
 
 `trttp!` copies a triangular matrix from the standard full format (TR) to the standard packed format (TP).
 
@@ -920,7 +920,7 @@ end
 
 """
     tpttr!(uplo, AP::AbstractVector, A)
-    tpttr!(AP::PackedMatrixUnscaled, A)
+    tpttr!(AP::SPMatrixUnscaled, A)
 
 `tpttr!` copies a triangular matrix from the standard packed format (TP) to the standard full format (TR).
 
@@ -932,14 +932,14 @@ tpttr!
 @pmalso :unscale function pptrf!(uplo::AbstractChar, AP::PM{<:BlasFloat})
     require_one_based_indexing(APv)
     chkstride1(APv)
-    PM <: PackedMatrixScaled && (AP = packed_unscale!(AP))
+    PM <: SPMatrixScaled && (AP = packed_unscale!(AP))
     _, info = pptrf!(uplo, packedside(AP), APv)
     return AP, info
 end
 
 """
     pptrf!(uplo, AP::AbstractVector) -> (AP, info)
-    pptrf!(AP::PackedMatrix) -> (AP, info)
+    pptrf!(AP::SPMatrix) -> (AP, info)
 
 `pptrf!` computes the Cholesky factorization of a real symmetric or complex Hermitian positive definite matrix ``A`` stored in
 packed format `AP`.
@@ -966,7 +966,7 @@ end
 
 """
     pptrs!(uplo, AP::AbstractVector, B)
-    pptrs!(AP::PackedMatrixUnscaled, B)
+    pptrs!(AP::SPMatrixUnscaled, B)
 
 `pptrs!` solves a system of linear equations ``A X = B`` with a symmetric or Hermitian positive definite matrix ``A`` in packed
 storage `AP` using the Cholesky factorization ``A = U' U`` or ``A = L L'`` computed by [`pptrf!`](@ref).
@@ -982,7 +982,7 @@ end
 
 """
     pptri!(uplo, AP::AbstractVector)
-    pptri!(AP::PackedMatrixUnscaled)
+    pptri!(AP::SPMatrixUnscaled)
 
 `pptri!` computes the inverse of a real symmetric or complex Hermitian positive definite matrix `A` using the Cholesky
 factorization ``A = U' U`` or ``A = L L'`` computed by [`pptrf!`](@ref).
@@ -1003,7 +1003,7 @@ pptri!
             require_one_based_indexing(ipiv)
             chkstride1(ipiv)
         end
-        PM <: PackedMatrixScaled && (AP = packed_unscale!(AP))
+        PM <: SPMatrixScaled && (AP = packed_unscale!(AP))
         $f(uplo, n, size(B, 2), APv, ipiv, B, max(1, stride(B, 2)))
         return B, AP, ipiv
     end
@@ -1013,7 +1013,7 @@ pptri!
 
 """
     $($fn)(uplo, AP::AbstractVector, ipiv=missing, B) -> (B, AP, ipiv)
-    $($fn)(AP::PackedMatrix, ipiv=missing, B) -> (B, AP, ipiv)
+    $($fn)(AP::SPMatrix, ipiv=missing, B) -> (B, AP, ipiv)
 
 `$($fn)` computes the solution to a $($field) system of linear equations ``A X = B``, where ``A`` is an ``N``-by-``N`` $($typ)
 matrix stored in packed format `AP` and ``X`` and `B` are ``N``-by-``N_{\\mathrm{rhs}}`` matrices.
@@ -1040,14 +1040,14 @@ end
             require_one_based_indexing(ipiv)
             chkstride1(ipiv)
         end
-        PM <: PackedMatrixScaled && (AP = packed_unscale!(AP))
+        PM <: SPMatrixScaled && (AP = packed_unscale!(AP))
         _, _, info = $f(uplo, n, APv, ipiv)
         return AP, ipiv, info
     end
 
 """
     $($fn)(uplo, AP::AbstractVector, ipiv=missing) -> (AP, ipiv, info)
-    $($fn)(AP::PackedMatrix, ipiv=missing) -> (AP, ipiv, info)
+    $($fn)(AP::SPMatrix, ipiv=missing) -> (AP, ipiv, info)
 
 `$($fn)` computes the factorization of a $($field) $($typ) matrix ``A`` stored in packed format `AP` using the Bunch-Kaufman
 diagonal pivoting method:
@@ -1073,7 +1073,7 @@ end
 
 """
     $($fn)(uplo, AP::AbstractVector, ipiv, B)
-    $($fn)(AP::PackedMatrixUnscaled, ipiv, B)
+    $($fn)(AP::SPMatrixUnscaled, ipiv, B)
 
 `$($fn)` solves a system of linear equations ``A X = B`` with a $($field) $($typ) matrix ``A`` stored in packed format using
 the factorization ``A = U D U$($op)`` or ``A = L D L$($op)`` computed by [`$($prefix)ptrf!`](@ref).
@@ -1101,7 +1101,7 @@ end
 
 """
     $($fn)(uplo, AP::AbstractVector, ipiv, work=missing)
-    $($fn)(AP::PackedMatrixUnscaled, ipiv, work=missing)
+    $($fn)(AP::SPMatrixUnscaled, ipiv, work=missing)
 
 `$($fn)` computes the inverse of a $($field) $($typ) indefinite matrix ``A`` in packed storage `AP` using the factorization
 ``A = U D U$($op)`` or ``A = L D L$($op)`` computed by [`$($prefix)ptrf!`](@ref).
@@ -1131,9 +1131,9 @@ spev!(jobz::AbstractChar, args...) = spev!(Val(Symbol(jobz)), args...)
         require_one_based_indexing(work)
         chkstride1(work)
     end
-    PM <: PackedMatrixScaled && rmul_diags!(AP, scalefac)
+    PM <: SPMatrixScaled && rmul_diags!(AP, scalefac)
     evs, _ = spev!('N', uplo, n, APv, W, Ptr{T}(C_NULL), 1, work)
-    return PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs
+    return PM <: SPMatrixScaled ? rmul!(evs, inv(scalefac)) : evs
 end
 
 @pmalso :diagscale function spev!(::Val{:V}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{T},Missing}=missing,
@@ -1163,9 +1163,9 @@ end
         require_one_based_indexing(work)
         chkstride1(work)
     end
-    PM <: PackedMatrixScaled && rmul_diags!(AP, scalefac)
+    PM <: SPMatrixScaled && rmul_diags!(AP, scalefac)
     evs, evecs = spev!('V', uplo, n, APv, W, Z, max(1, stride(Z, 2)), work)
-    return (PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs), evecs
+    return (PM <: SPMatrixScaled ? rmul!(evs, inv(scalefac)) : evs), evecs
 end
 
 @pmalso :diagscale function spev!(::Val{:N}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{R},Missing}=missing,
@@ -1196,9 +1196,9 @@ end
         require_one_based_indexing(rwork)
         chkstride1(rwork)
     end
-    PM <: PackedMatrixScaled && rmul_diags!(AP, scalefac)
+    PM <: SPMatrixScaled && rmul_diags!(AP, scalefac)
     evs, _ = spev!('N', uplo, n, APv, W, Ptr{T}(C_NULL), 1, work, rwork)
-    return PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs
+    return PM <: SPMatrixScaled ? rmul!(evs, inv(scalefac)) : evs
 end
 
 @pmalso :diagscale function spev!(::Val{:V}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{R},Missing}=missing,
@@ -1236,17 +1236,17 @@ end
         require_one_based_indexing(rwork)
         chkstride1(rwork)
     end
-    PM <: PackedMatrixScaled && rmul_diags!(AP, scalefac)
+    PM <: SPMatrixScaled && rmul_diags!(AP, scalefac)
     evs, evecs = spev!('V', uplo, n, APv, W, Z, max(1, stride(Z, 2)), work, rwork)
-    return (PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs), evecs
+    return (PM <: SPMatrixScaled ? rmul!(evs, inv(scalefac)) : evs), evecs
 end
 
 """
     spev!('N', uplo, AP::AbstractVector, W=missing, work=missing[, rwork=missing]) -> W
-    spev!('N', AP::PackedMatrix, W=missing, work=missing[, rwork=missing]) -> W
+    spev!('N', AP::SPMatrix, W=missing, work=missing[, rwork=missing]) -> W
     spev!('V', uplo, AP::AbstractVector, W=missing, Z=missing, work=missing
         [, rwork=missing]) -> (W, Z)
-    spev!('V', AP::PackedMatrix, W=missing, Z=missing, work=missing[, rwork=missing])
+    spev!('V', AP::SPMatrix, W=missing, Z=missing, work=missing[, rwork=missing])
         -> (W, Z)
 
 Finds the eigenvalues (first parameter `'N'`) or eigenvalues and eigenvectors (first parameter `'V'`) of a Hermitian matrix
@@ -1261,7 +1261,7 @@ spev!
 spevx!(jobz::AbstractChar, args...) = spevx!(Val(Symbol(jobz)), args...)
 spevx!(jobz::Val, uplo::AbstractChar, AP::AbstractVector) =
     spevx!(jobz, 'A', uplo, AP, nothing, nothing, nothing, nothing, _realtype(eltype(AP))(-1))
-spevx!(jobz::Val, AP::PackedMatrix) =
+spevx!(jobz::Val, AP::SPMatrix) =
     spevx!(jobz, 'A', AP, nothing, nothing, nothing, nothing, _realtype(eltype(AP))(-1))
 
 @pmalso :diagscale function spevx!(::Val{:N}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, vl::Union{Nothing,T},
@@ -1298,14 +1298,14 @@ spevx!(jobz::Val, AP::PackedMatrix) =
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    if PM <: PackedMatrixScaled
+    if PM <: SPMatrixScaled
         rmul_diags!(AP, scalefac)
         !isnothing(vl) && (vl *= scalefac)
         !isnothing(vu) && (vu *= scalefac)
     end
     m, _, _, _, _ = spevx!('N', range, uplo, n, APv, vl, vu, il, iu, abstol, W, Ptr{T}(C_NULL), 1, work, iwork,
         Ptr{BlasInt}(C_NULL))
-    return PM <: PackedMatrixScaled ? rmul!(@view(W[1:m]), inv(scalefac)) : @view(W[1:m])
+    return PM <: SPMatrixScaled ? rmul!(@view(W[1:m]), inv(scalefac)) : @view(W[1:m])
 end
 
 @pmalso :diagscale function spevx!(::Val{:V}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, vl::Union{Nothing,T},
@@ -1364,13 +1364,13 @@ end
         require_one_based_indexing(ifail)
         chkstride1(ifail)
     end
-    if PM <: PackedMatrixScaled
+    if PM <: SPMatrixScaled
         rmul_diags!(AP, scalefac)
         !isnothing(vl) && (vl *= scalefac)
         !isnothing(vu) && (vu *= scalefac)
     end
     m, _, _, info, _ = spevx!('V', range, uplo, n, APv, vl, vu, il, iu, abstol, W, Z, max(1, stride(Z, 2)), work, iwork, ifail)
-    return (PM <: PackedMatrixScaled ? rmul!(@view(W[1:m]), inv(scalefac)) : @view(W[1:m])),
+    return (PM <: SPMatrixScaled ? rmul!(@view(W[1:m]), inv(scalefac)) : @view(W[1:m])),
         @view(Z[:, 1:m]), info, @view(ifail[1:m])
 end
 
@@ -1416,14 +1416,14 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    if PM <: PackedMatrixScaled
+    if PM <: SPMatrixScaled
         rmul_diags!(AP, scalefac)
         !isnothing(vl) && (vl *= scalefac)
         !isnothing(vu) && (vu *= scalefac)
     end
     m, _, _, _, _, = spevx!('N', range, uplo, n, APv, vl, vu, il, iu, abstol, W, Ptr{T}(C_NULL), 1, work, rwork, iwork,
         Ptr{BlasInt}(C_NULL))
-    return PM <: PackedMatrixScaled ? rmul!(@view(W[1:m]), inv(scalefac)) : @view(W[1:m])
+    return PM <: SPMatrixScaled ? rmul!(@view(W[1:m]), inv(scalefac)) : @view(W[1:m])
 end
 
 @pmalso :diagscale function spevx!(::Val{:V}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, vl::Union{Nothing,R},
@@ -1489,26 +1489,26 @@ end
         require_one_based_indexing(ifail)
         chkstride1(ifail)
     end
-    if PM <: PackedMatrixScaled
+    if PM <: SPMatrixScaled
         rmul_diags!(AP, scalefac)
         !isnothing(vl) && (vl *= scalefac)
         !isnothing(vu) && (vu *= scalefac)
     end
     m, _, _, info, _ = spevx!('V', range, uplo, n, APv, vl, vu, il, iu, abstol, W, Z, max(1, stride(Z, 2)), work, rwork, iwork,
         ifail)
-    return (PM <: PackedMatrixScaled ? rmul!(@view(W[1:m]), inv(scalefac)) : @view(W[1:m])),
+    return (PM <: SPMatrixScaled ? rmul!(@view(W[1:m]), inv(scalefac)) : @view(W[1:m])),
         @view(Z[:, 1:m]), info, @view(ifail[1:m])
 end
 
 """
     spevx!('N', range, uplo, AP::AbstractVector, vl, vu, il, iu, abstol, W=missing,
         work=missing[, rwork=missing], iwork=missing) -> view(W)
-    spevx!('N', range, AP::PackedMatrix, vl, vu, il, iu, abstol, W=missing, work=missing
+    spevx!('N', range, AP::SPMatrix, vl, vu, il, iu, abstol, W=missing, work=missing
         [, rwork=missing], iwork=missing) -> view(W)
     spevx!('V', range, uplo, AP::AbstractVector, vl, vu, il, iu, abstol, W=missing,
         Z=missing, work=missing[, rwork=missing], iwork=missing, ifail=missing)
         -> (view(W), view(Z), info, view(ifail))
-    spevx!('V', range, AP::PackedMatrix, vl, vu, il, iu, abstol, W=missing, Z=missing,
+    spevx!('V', range, AP::SPMatrix, vl, vu, il, iu, abstol, W=missing, Z=missing,
         work=missing[, rwork=missing], iwork=missing, ifail=missing)
         -> (view(W), view(Z), info, view(ifail))
 
@@ -1557,9 +1557,9 @@ spevd!(jobz::AbstractChar, args...) = spevd!(Val(Symbol(jobz)), args...)
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    PM <: PackedMatrixScaled && rmul_diags!(AP, scalefac)
+    PM <: SPMatrixScaled && rmul_diags!(AP, scalefac)
     evs, _ = spevd!('N', uplo, n, APv, W, Ptr{T}(C_NULL), 1, work, length(work), iwork, length(iwork))
-    return PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs
+    return PM <: SPMatrixScaled ? rmul!(evs, inv(scalefac)) : evs
 end
 
 @pmalso :diagscale function spevd!(::Val{:V}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{T},Missing}=missing,
@@ -1597,9 +1597,9 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    PM <: PackedMatrixScaled && rmul_diags!(AP, scalefac)
+    PM <: SPMatrixScaled && rmul_diags!(AP, scalefac)
     evs, evecs = spevd!('V', uplo, n, APv, W, Z, max(1, stride(Z, 2)), work, length(work), iwork, length(iwork))
-    return (PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs), evecs
+    return (PM <: SPMatrixScaled ? rmul!(evs, inv(scalefac)) : evs), evecs
 end
 
 @pmalso :diagscale function spevd!(::Val{:N}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{R},Missing}=missing,
@@ -1637,9 +1637,9 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    PM <: PackedMatrixScaled && rmul_diags!(AP, scalefac)
+    PM <: SPMatrixScaled && rmul_diags!(AP, scalefac)
     evs, _ = spevd!('N', uplo, n, APv, W, Ptr{T}(C_NULL), 1, work, length(work), rwork, length(rwork), iwork, length(iwork))
-    return PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs
+    return PM <: SPMatrixScaled ? rmul!(evs, inv(scalefac)) : evs
 end
 
 @pmalso :diagscale function spevd!(::Val{:V}, uplo::AbstractChar, AP::PM{T}, W::Union{<:AbstractVector{R},Missing}=missing,
@@ -1685,20 +1685,20 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    PM <: PackedMatrixScaled && rmul_diags!(AP, scalefac)
+    PM <: SPMatrixScaled && rmul_diags!(AP, scalefac)
     evs, evecs = spevd!('V', uplo, n, APv, W, Z, max(1, stride(Z, 2)), work, length(work), rwork, length(rwork), iwork,
         length(iwork))
-    return (PM <: PackedMatrixScaled ? rmul!(evs, inv(scalefac)) : evs), evecs
+    return (PM <: SPMatrixScaled ? rmul!(evs, inv(scalefac)) : evs), evecs
 end
 
 """
     spevd!('N', uplo, AP::AbstractVector, W=missing, work=missing[, rwork=missing],
         iwork=missing) -> W
-    spevd!('N', AP::PackedMatrix, W=missing, work=missing[, rwork=missing],
+    spevd!('N', AP::SPMatrix, W=missing, work=missing[, rwork=missing],
         iwork=missing) -> W
     spevd!('V', uplo, AP::AbstractVector, W=missing, Z=missing, work=missing
         [, rwork=missing], iwork=missing) -> (W, Z)
-    spevd!('V', AP::PackedMatrix, W=missing, Z=missing, work=missing[, rwork=missing],
+    spevd!('V', AP::SPMatrix, W=missing, Z=missing, work=missing[, rwork=missing],
         iwork=missing) -> (W, Z)
 
 Finds the eigenvalues (first parameter `'N'`) or eigenvalues and eigenvectors (first parameter `'V'`) of a Hermitian matrix
@@ -1735,7 +1735,7 @@ spgv!(itype::Integer, jobz::AbstractChar, args...) = spgv!(itype, Val(Symbol(job
         require_one_based_indexing(work)
         chkstride1(work)
     end
-    if PM <: PackedMatrixScaled
+    if PM <: SPMatrixScaled
         AP = packed_unscale!(AP)
         BP = packed_unscale!(BP)
     end
@@ -1772,7 +1772,7 @@ end
         require_one_based_indexing(work)
         chkstride1(work)
     end
-    if PM <: PackedMatrixScaled
+    if PM <: SPMatrixScaled
         AP = packed_unscale!(AP)
         BP = packed_unscale!(BP)
     end
@@ -1809,7 +1809,7 @@ end
         require_one_based_indexing(rwork)
         chkstride1(rwork)
     end
-    if PM <: PackedMatrixScaled
+    if PM <: SPMatrixScaled
         AP = packed_unscale!(AP)
         BP = packed_unscale!(BP)
     end
@@ -1854,7 +1854,7 @@ end
         require_one_based_indexing(rwork)
         chkstride1(rwork)
     end
-    if PM <: PackedMatrixScaled
+    if PM <: SPMatrixScaled
         AP = packed_unscale!(AP)
         BP = packed_unscale!(BP)
     end
@@ -1865,11 +1865,11 @@ end
 """
     spgv!(itype, 'N', uplo, AP::AbstractVector, BP::AbstractVector, W=missing,
         work=missing[, rwork=missing]) -> (W, BP)
-    spgv!(itype, 'N', AP::PackedMatrix, BP::PackedMatrix, W=missing, work=missing
+    spgv!(itype, 'N', AP::SPMatrix, BP::SPMatrix, W=missing, work=missing
         [, rwork=missing]) -> (W, BP)
     spgv!(itype, 'V', uplo, AP::AbstractVector, BP::AbstractVector, W=missing, Z=missing,
         work=missing[, rwork=missing]) -> (W, Z, BP)
-    spgv!(itype, 'V', AP::PackedMatrix, BP::PackedMatrix, W=missing, Z=missing,
+    spgv!(itype, 'V', AP::SPMatrix, BP::SPMatrix, W=missing, Z=missing,
         work=missing[, rwork=missing]) -> (W, Z, BP)
 
 Finds the generalized eigenvalues (second parameter `'N'`) or eigenvalues and eigenvectors (second parameter `'V'`) of a
@@ -1893,7 +1893,7 @@ spgv!
 spgvx!(itype::Integer, jobz::AbstractChar, args...) = spgvx!(itype, Val(Symbol(jobz)), args...)
 spgvx!(itype::Integer, jobz::Val, uplo::AbstractChar, AP::PM, BP::PM) where {PM<:AbstractVector} =
     spgvx!(itype, jobz, 'A', uplo, AP, BP, nothing, nothing, nothing, nothing, _realtype(eltype(AP))(-1))
-spgvx!(itype::Integer, jobz::Val, AP::PM, BP::PM) where {PM<:PackedMatrix} =
+spgvx!(itype::Integer, jobz::Val, AP::PM, BP::PM) where {PM<:SPMatrix} =
     spgvx!(itype, jobz, 'A', AP, BP, nothing, nothing, nothing, nothing, _realtype(eltype(AP))(-1))
 
 @pmalso :unscale function spgvx!(itype::Integer, ::Val{:N}, range::AbstractChar, uplo::AbstractChar, AP::PM{T}, BP::PM{T},
@@ -1932,7 +1932,7 @@ spgvx!(itype::Integer, jobz::Val, AP::PM, BP::PM) where {PM<:PackedMatrix} =
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    if PM <: PackedMatrixScaled
+    if PM <: SPMatrixScaled
         AP = packed_unscale!(AP)
         BP = packed_unscale!(BP)
     end
@@ -1997,7 +1997,7 @@ end
         require_one_based_indexing(ifail)
         chkstride1(ifail)
     end
-    if PM <: PackedMatrixScaled
+    if PM <: SPMatrixScaled
         AP = packed_unscale!(AP)
         BP = packed_unscale!(BP)
     end
@@ -2049,7 +2049,7 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    if PM <: PackedMatrixScaled
+    if PM <: SPMatrixScaled
         AP = packed_unscale!(AP)
         BP = packed_unscale!(BP)
     end
@@ -2122,7 +2122,7 @@ end
         require_one_based_indexing(ifail)
         chkstride1(ifail)
     end
-    if PM <: PackedMatrixScaled
+    if PM <: SPMatrixScaled
         AP = packed_unscale!(AP)
         BP = packed_unscale!(BP)
     end
@@ -2135,12 +2135,12 @@ end
     spgvx!(itype, 'N', range, uplo, AP::AbstractVector, BP::AbstractVector, vl, vu,
         il, iu, abstol, W=missing, work=missing[, rwork=missing], iwork=missing)
         -> (view(W), BP)
-    spgvx!(itype, 'N', range, AP::PackedMatrix, BP::PackedMatrix, vl, vu, il, iu, abstol,
+    spgvx!(itype, 'N', range, AP::SPMatrix, BP::SPMatrix, vl, vu, il, iu, abstol,
         W=missing, work=missing[, rwork=missing], iwork=missing) -> (view(W), BP)
     spgvx!(itype, 'V', range, uplo, AP::AbstractVector, BP::AbstractVector, vl, vu,
         il, iu, abstol, W=missing, Z=missing, work=missing[, rwork=missing],
         iwork=missing, ifail=missing) -> (view(W), view(Z), info, view(ifail), BP)
-    spgvx!(itype, 'V', range, AP::PackedMatrix, BP::PackedMatrix, vl, vu, il, iu, abstol,
+    spgvx!(itype, 'V', range, AP::SPMatrix, BP::SPMatrix, vl, vu, il, iu, abstol,
         W=missing, Z=missing, work=missing[, rwork=missing], iwork=missing, ifail=missing)
         -> (view(W), view(Z), info, view(ifail), BP)
 
@@ -2199,7 +2199,7 @@ spgvd!(itype::Integer, jobz::AbstractChar, args...) = spgvd!(itype, Val(Symbol(j
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    if PM <: PackedMatrixScaled
+    if PM <: SPMatrixScaled
         AP = packed_unscale!(AP)
         BP = packed_unscale!(BP)
     end
@@ -2244,7 +2244,7 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    if PM <: PackedMatrixScaled
+    if PM <: SPMatrixScaled
         AP = packed_unscale!(AP)
         BP = packed_unscale!(BP)
     end
@@ -2289,7 +2289,7 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    if PM <: PackedMatrixScaled
+    if PM <: SPMatrixScaled
         AP = packed_unscale!(AP)
         BP = packed_unscale!(BP)
     end
@@ -2342,7 +2342,7 @@ end
         require_one_based_indexing(iwork)
         chkstride1(iwork)
     end
-    if PM <: PackedMatrixScaled
+    if PM <: SPMatrixScaled
         AP = packed_unscale!(AP)
         BP = packed_unscale!(BP)
     end
@@ -2354,11 +2354,11 @@ end
 """
     spgvd!(itype, 'N', uplo, AP::AbstractVector, BP::AbstractVector, W=missing,
         work=missing[, rwork=missing], iwork=missing) -> (W, BP)
-    spgvd!(itype, 'N', AP::PackedMatrix, BP::PackedMatrix, W=missing, work=missing
+    spgvd!(itype, 'N', AP::SPMatrix, BP::SPMatrix, W=missing, work=missing
         [, rwork=missing], iwork=missing) -> (W, BP)
     spgvd!(itype, 'V', uplo, AP::AbstractVector, BP::AbstractVector, W=missing, Z=missing,
         work=missing[, rwork=missing], iwork=missing) -> (W, Z, BP)
-    spgvd!(itype, 'V', AP::PackedMatrix, BP::PackedMatrix, W=missing, Z=missing,
+    spgvd!(itype, 'V', AP::SPMatrix, BP::SPMatrix, W=missing, Z=missing,
         work=missing[, rwork=missing], iwork=missing) -> (W, Z, BP)
 
 Finds the generalized eigenvalues (second parameter `'N'`) or eigenvalues and eigenvectors (second parameter `'V'`) of a
@@ -2409,14 +2409,14 @@ spgvd!
         require_one_based_indexing(τ)
         chkstride1(τ)
     end
-    PM <: PackedMatrixScaled && (AP = packed_unscale!(AP))
+    PM <: SPMatrixScaled && (AP = packed_unscale!(AP))
     hptrd!(uplo, n, APv, D, E, τ)
     return AP, τ, D, E
 end
 
 """
     hptrd!(uplo, AP::AbstractVector, D=missing, E=missing, τ=missing) -> (A, τ, D, E)
-    hptrd!(AP::PackedMatrix, D=missing, E=missing, τ=missing) -> (A, τ, D, E)
+    hptrd!(AP::SPMatrix, D=missing, E=missing, τ=missing) -> (A, τ, D, E)
 
 `hptrd!` reduces a Hermitian matrix ``A`` stored in packed form `AP` to real-symmetric tridiagonal form ``T`` by an orthogonal
 similarity transformation: ``Q' A Q = T``.
@@ -2461,7 +2461,7 @@ end
 
 """
     opgtr!(uplo, AP::AbstractVector, τ, Q=missing, work=missing)
-    opgtr!(AP::PackedMatrixUnscaled, τ, Q=missing, work=missing)
+    opgtr!(AP::SPMatrixUnscaled, τ, Q=missing, work=missing)
 
 Explicitly finds `Q`, the orthogonal/unitary matrix from [`hptrd!`](@ref). `uplo`, `AP`, and `τ` must correspond to the
 input/output to `hptrd!`.
@@ -2501,7 +2501,7 @@ end
 
 @doc raw"""
     opmtr!(side, uplo, trans, AP::AbstractVector, τ, C, work=missing)
-    opmtr!(side, trans, AP::PackedMatrixUnscaled, τ, C, work=missing)
+    opmtr!(side, trans, AP::SPMatrixUnscaled, τ, C, work=missing)
 
 `opmtr!` overwrites the general ``m \times n`` matrix `C` with
 

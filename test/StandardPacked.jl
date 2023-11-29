@@ -1,5 +1,5 @@
 using Test
-using PackedMatrices
+using StandardPacked
 using LinearAlgebra, SparseArrays
 using Base: _realtype
 
@@ -54,7 +54,7 @@ end
                 0.28805895941204235,0.37896523547769884,0.7741030577273389,0.4682395560638831,0.3925705265236962,
                 0.14756643458657948,0.13031356174695136,0.45340576959493983]
         end
-        pm = PackedMatrix(n, data, fmt)
+        pm = SPMatrix(n, data, fmt)
         @testset "Elementary properties" begin
             @test size(pm) == (n, n)
             @test LinearAlgebra.checksquare(pm) == packedside(pm) == packedside(vec(pm)) == n
@@ -71,9 +71,9 @@ end
             @test [x for x in pm] == data
             @test eqapprox(Matrix(pm), refmatrix, sca, rtol=2eps(elty))
             if sca === :S
-                @test vec(lmul_offdiags!(sqrt(elty(2)), PackedMatrix(Symmetric(refmatrix, tri)))) ≈ vec(pm) rtol=2eps(elty)
+                @test vec(lmul_offdiags!(sqrt(elty(2)), SPMatrix(Symmetric(refmatrix, tri)))) ≈ vec(pm) rtol=2eps(elty)
             else
-                @test PackedMatrix(Symmetric(refmatrix, tri)) == pm
+                @test SPMatrix(Symmetric(refmatrix, tri)) == pm
             end
             @test eqapprox([pm[i, j] for i in 1:n, j in 1:n], refmatrix, sca, rtol=2eps(elty))
             fill!(pm, zero(elty))
@@ -90,7 +90,7 @@ end
             @test copyto!(pm, refmatrix) === pm
             @test eqapprox(Matrix(pm), refmatrix, sca, rtol=2eps(elty))
             sca === :S && copy!(pm, refmatrix)
-            @test_throws ErrorException PackedMatrix(pm, tri === :U ? :L : :U)
+            @test_throws ErrorException SPMatrix(pm, tri === :U ? :L : :U)
             @test diag(pm) == diag(refmatrix)
             @test tr(pm) == tr(refmatrix)
         end
@@ -160,7 +160,7 @@ end
         end
 
         @testset "Scalar product and norm" begin
-            pms = PackedMatrix(n, sparsevec(data), fmt)
+            pms = SPMatrix(n, sparsevec(data), fmt)
             @test dot(pm, pm) ≈ 12.788602219279593 rtol=2eps(elty)
             @test dot(pm, pms) ≈ 12.788602219279593 rtol=2eps(elty)
             @test dot(pms, pms) ≈ 12.788602219279593 rtol=2eps(elty)
@@ -174,7 +174,7 @@ end
             end
             fill!(pmc, zero(elty))
             pmc[diagind(pmc)] .= elty.(3:9)
-            pmcs = PackedMatrix(n, SparseVector{elty,Int}(packedsize(n), Int[], elty[]), fmt)
+            pmcs = SPMatrix(n, SparseVector{elty,Int}(packedsize(n), Int[], elty[]), fmt)
             pmcs[diagind(pmcs)] .= elty.(3:9)
             @test dot(pm, pmc) ≈ 19.034233988404225 rtol=2eps(elty)
             @test dot(pm, pmcs) ≈ 19.034233988404225 rtol=2eps(elty)
@@ -230,12 +230,12 @@ end
                     @test newev[2] ≈ es.vectors
                 end
                 @test spevx!('N', copy(pm)) ≈ es.values
-                @test spevx!('N', PackedMatrices.packed_ulchar(pm), vec(packed_unscale!(copy(pm)))) ≈ es.values
+                @test spevx!('N', StandardPacked.packed_ulchar(pm), vec(packed_unscale!(copy(pm)))) ≈ es.values
                 let newev=spevx!('V', copy(pm))
                     @test newev[1] ≈ es.values
                     @test newev[2] ≈ es.vectors
                 end
-                let newev=spevx!('V', PackedMatrices.packed_ulchar(pm), vec(packed_unscale!(copy(pm))))
+                let newev=spevx!('V', StandardPacked.packed_ulchar(pm), vec(packed_unscale!(copy(pm))))
                     @test newev[1] ≈ es.values
                     @test newev[2] ≈ es.vectors
                 end
@@ -339,7 +339,7 @@ end
                         2.4287428457369566, -3.223503678806422, -1.051372235045932, 2.334950051469201, 2.8088828475702017,
                         1.3375313347692173, -1.18596615745617, 2.7118723016325204, 0.5732061331279432, 3.326008695109104]
                 end
-                pmb = PackedMatrix(n, bdata, fmt)
+                pmb = SPMatrix(n, bdata, fmt)
                 es = eigen(pm, pmb)
                 @test es.values ≈ elty[-1.8318388366067977, -0.3922353401226242, 0.0029830752157166502, 0.06152008931674012,
                     0.9448050424793925, 3.6505581997040495, 12.606653507880447]
@@ -372,13 +372,13 @@ end
                     @test newev[2] ≈ es.vectors
                 end
                 @test spgvx!(1, 'N', copy(pm), copy(pmb))[1] ≈ es.values
-                @test spgvx!(1, 'N', PackedMatrices.packed_ulchar(pm), vec(packed_unscale!(copy(pm))),
+                @test spgvx!(1, 'N', StandardPacked.packed_ulchar(pm), vec(packed_unscale!(copy(pm))),
                     vec(packed_unscale!(copy(pmb))))[1] ≈ es.values
                 let newev=spgvx!(1, 'V', copy(pm), copy(pmb))
                     @test newev[1] ≈ es.values
                     @test newev[2] ≈ es.vectors
                 end
-                let newev=spgvx!(1, 'V', PackedMatrices.packed_ulchar(pm), vec(packed_unscale!(copy(pm))),
+                let newev=spgvx!(1, 'V', StandardPacked.packed_ulchar(pm), vec(packed_unscale!(copy(pm))),
                         vec(packed_unscale!(copy(pmb))))
                     @test newev[1] ≈ es.values
                     @test newev[2] ≈ es.vectors
@@ -484,14 +484,14 @@ end
                     0. 0. 0. 0. 0. 0.5053369729908973 -0.8290079246701668
                     0. 0. 0. 0. 0. 0. 0.20854097637370994]
                 if fmt === :U
-                    @test inv(chol) ≈ PackedMatrix(n, elty[15.493628236589293, 18.055791818905497, 22.83884746037381,
+                    @test inv(chol) ≈ SPMatrix(n, elty[15.493628236589293, 18.055791818905497, 22.83884746037381,
                         22.56819523083977, 28.380477703283688, 39.43723994306926, -13.664618497320284, -16.691276904083473,
                         -20.71296414574622, 13.085254087036088, 1.6509049892926726, 1.8105792940720054, 2.1679624382488236,
                         -1.5390396304367675, 0.8211060409222076, -31.02109455183003, -37.87395046635378, -49.32438789295014,
                         27.97393922067559, -3.29559139381791, 65.7991061056096, -17.607661895505345, -21.93913378183722,
                         -29.465880029842584, 15.993513682029798, -1.819156241457544, 37.72200796466474, 22.99414125333774]) rtol=150eps(elty)
                 elseif fmt === :L
-                    @test inv(chol) ≈ PackedMatrix(n, elty[15.493628236589293, 18.05579181890549, 22.568195230839763,
+                    @test inv(chol) ≈ SPMatrix(n, elty[15.493628236589293, 18.05579181890549, 22.568195230839763,
                         -13.664618497320282, 1.6509049892926717, -31.02109455183003, -17.60766189550534, 22.83884746037381,
                         28.380477703283688, -16.691276904083473, 1.8105792940720045, -37.87395046635378, -21.93913378183722,
                         39.43723994306926, -20.71296414574622, 2.1679624382488223, -49.32438789295014, -29.465880029842584,
@@ -507,7 +507,7 @@ end
                     let P=bk.P, U=bk.U, D=bk.D
                         @test P' * U * D * U' * P ≈ Matrix(pm)
                     end
-                    @test inv(bk) ≈ PackedMatrix(n, elty[11.676181149869125, -25.74304267079464, 55.837437314564454,
+                    @test inv(bk) ≈ SPMatrix(n, elty[11.676181149869125, -25.74304267079464, 55.837437314564454,
                         -3.890135969716243, 9.077199222177283, 1.0285759205945262, 24.102856515354063, -51.37534555845253,
                         -9.226894089251159,  49.46819607136643, 9.176107458680693, -21.095279400248227, -3.294216491388214,
                         19.103438949417768, 9.400381615980521, -26.29273501144287, 59.09033629509751, 9.912693866880879,
@@ -517,7 +517,7 @@ end
                     let P=bk.P, L=bk.L, D=bk.D
                         @test P' * L * D * L' * P ≈ Matrix(pm)
                     end
-                    @test inv(bk) ≈ PackedMatrix(n, elty[11.676181149869125, -25.743042670794633, -3.8901359697162454,
+                    @test inv(bk) ≈ SPMatrix(n, elty[11.676181149869125, -25.743042670794633, -3.8901359697162454,
                         24.102856515354063, 9.176107458680692, -26.29273501144288, 7.584280750861906, 55.837437314564454,
                         9.07719922217729, -51.37534555845255, -21.09527940024823, 59.090336295097536, -17.484312579760644,
                         1.0285759205945262, -9.226894089251154, -3.294216491388212, 9.912693866880876, -1.9062117598362565,
@@ -581,7 +581,7 @@ Base.eps(::Type{Complex{R}}) where {R} = 10eps(R)
                 0.7033816201420316+0.7267111388539681im,1.0193562485719514-0.9645175874465902im,-0.2768539177884062,
                 -1.0682119493903148+0.248551493560475im,-0.020565681831590243]
         end
-        pm = PackedMatrix(n, data, fmt)
+        pm = SPMatrix(n, data, fmt)
         @testset "Elementary properties" begin
             @test size(pm) == (n, n)
             @test LinearAlgebra.checksquare(pm) == packedside(pm) == packedside(vec(pm)) == n
@@ -598,9 +598,9 @@ Base.eps(::Type{Complex{R}}) where {R} = 10eps(R)
             @test [x for x in pm] == data
             @test eqapprox(Matrix(pm), refmatrix, sca, rtol=2eps(elty))
             if sca === :S
-                @test vec(lmul_offdiags!(sqrt(elty(2)), PackedMatrix(Symmetric(refmatrix, tri)))) ≈ vec(pm) rtol=2eps(elty)
+                @test vec(lmul_offdiags!(sqrt(elty(2)), SPMatrix(Symmetric(refmatrix, tri)))) ≈ vec(pm) rtol=2eps(elty)
             else
-                @test PackedMatrix(Symmetric(refmatrix, tri)) == pm
+                @test SPMatrix(Symmetric(refmatrix, tri)) == pm
             end
             @test eqapprox([pm[i, j] for i in 1:n, j in 1:n], refmatrix, sca, rtol=2eps(elty))
             fill!(pm, zero(elty))
@@ -617,7 +617,7 @@ Base.eps(::Type{Complex{R}}) where {R} = 10eps(R)
             @test copyto!(pm, refmatrix) === pm
             @test eqapprox(Matrix(pm), refmatrix, sca, rtol=2eps(elty))
             sca === :S && copy!(pm, refmatrix)
-            @test_throws ErrorException PackedMatrix(pm, tri === :U ? :L : :U)
+            @test_throws ErrorException SPMatrix(pm, tri === :U ? :L : :U)
             @test diag(pm) == diag(refmatrix)
             @test tr(pm) == tr(refmatrix)
         end
@@ -663,7 +663,7 @@ Base.eps(::Type{Complex{R}}) where {R} = 10eps(R)
         end
 
         @testset "Scalar product and norm" begin
-            pms = PackedMatrix(n, sparsevec(data), fmt)
+            pms = SPMatrix(n, sparsevec(data), fmt)
             @test dot(pm, pm) ≈ 15.377768001340606 rtol=2eps(elty)
             @test dot(pm, pms) ≈ 15.377768001340606 rtol=2eps(elty)
             @test dot(pms, pms) ≈ 15.377768001340606 rtol=2eps(elty)
@@ -677,7 +677,7 @@ Base.eps(::Type{Complex{R}}) where {R} = 10eps(R)
             end
             fill!(pmc, zero(elty))
             pmc[diagind(pmc)] .= elty.(3:8) .+ elty.(9:14) .* im
-            pmcs = PackedMatrix(n, SparseVector{elty,Int}(packedsize(n), Int[], elty[]), fmt)
+            pmcs = SPMatrix(n, SparseVector{elty,Int}(packedsize(n), Int[], elty[]), fmt)
             pmcs[diagind(pmcs)] .= elty.(3:8) + elty.(9:14) .* im
             @test dot(pm, pmc) ≈ 1.09927068388477 + 1.9607175946344464im rtol=2eps(elty)
             @test dot(pm, pmcs) ≈ 1.09927068388477 + 1.9607175946344464im rtol=2eps(elty)
@@ -736,12 +736,12 @@ Base.eps(::Type{Complex{R}}) where {R} = 10eps(R)
                     @test newev[2] ≈ es.vectors
                 end
                 @test spevx!('N', copy(pm)) ≈ es.values
-                @test spevx!('N', PackedMatrices.packed_ulchar(pm), vec(packed_unscale!(copy(pm)))) ≈ es.values
+                @test spevx!('N', StandardPacked.packed_ulchar(pm), vec(packed_unscale!(copy(pm)))) ≈ es.values
                 let newev=spevx!('V', copy(pm))
                     @test newev[1] ≈ es.values
                     @test newev[2] ≈ es.vectors
                 end
-                let newev=spevx!('V', PackedMatrices.packed_ulchar(pm), vec(packed_unscale!(copy(pm))))
+                let newev=spevx!('V', StandardPacked.packed_ulchar(pm), vec(packed_unscale!(copy(pm))))
                     @test newev[1] ≈ es.values
                     @test newev[2] ≈ es.vectors
                 end
@@ -868,7 +868,7 @@ Base.eps(::Type{Complex{R}}) where {R} = 10eps(R)
                         -0.3189132384601809+1.9772077984005203im,3.67987308967989,0.9373433770783627+0.6983103012872991im,
                         2.803213794390974]
                 end
-                pmb = PackedMatrix(n, bdata, fmt)
+                pmb = SPMatrix(n, bdata, fmt)
                 es = eigen(pm, pmb)
                 @test es.values ≈ elty[-1.484039608505412, -0.7335312961620745, -0.08396534056233655, 0.01312285400345312,
                     0.42567784779823886, 6.9689832966188865]
@@ -901,13 +901,13 @@ Base.eps(::Type{Complex{R}}) where {R} = 10eps(R)
                     @test newev[2] ≈ es.vectors
                 end
                 @test spgvx!(1, 'N', copy(pm), copy(pmb))[1] ≈ es.values
-                @test spgvx!(1, 'N', PackedMatrices.packed_ulchar(pm), vec(packed_unscale!(copy(pm))),
+                @test spgvx!(1, 'N', StandardPacked.packed_ulchar(pm), vec(packed_unscale!(copy(pm))),
                     vec(packed_unscale!(copy(pmb))))[1] ≈ es.values
                 let newev=spgvx!(1, 'V', copy(pm), copy(pmb))
                     @test newev[1] ≈ es.values
                     @test newev[2] ≈ es.vectors
                 end
-                let newev=spgvx!(1, 'V', PackedMatrices.packed_ulchar(pm), vec(packed_unscale!(copy(pm))),
+                let newev=spgvx!(1, 'V', StandardPacked.packed_ulchar(pm), vec(packed_unscale!(copy(pm))),
                         vec(packed_unscale!(copy(pmb))))
                     @test newev[1] ≈ es.values
                     @test newev[2] ≈ es.vectors
@@ -1024,7 +1024,7 @@ Base.eps(::Type{Complex{R}}) where {R} = 10eps(R)
                     0 0 0 0 1.3919156801166248 -0.5496104112521715-0.12035374245116845im
                     0 0 0 0 0 1.4134814084964848]
                 if fmt === :U
-                    @test inv(chol) ≈ PackedMatrix(n, elty[0.46676198444101286, 0.19669555770270547+0.06898329440739434im,
+                    @test inv(chol) ≈ SPMatrix(n, elty[0.46676198444101286, 0.19669555770270547+0.06898329440739434im,
                         0.6161220314750114, -0.08497237300850695-0.05491894824021812im,
                         -0.16138772611064955+0.040912777231089686im, 0.46110669589135866,
                         -0.03824811431135422-0.09674411265061586im, -0.2123024038723344-0.09853816136876509im,
@@ -1036,7 +1036,7 @@ Base.eps(::Type{Complex{R}}) where {R} = 10eps(R)
                         -0.16130439852103787-0.02454626672741417im, 0.19763407368114647+0.04327792908654072im,
                         0.5005181132856956]) rtol=150eps(elty)
                 elseif fmt === :L
-                    @test inv(chol) ≈ PackedMatrix(n, elty[0.46676198444101286, 0.19669555770270547-0.06898329440739431im,
+                    @test inv(chol) ≈ SPMatrix(n, elty[0.46676198444101286, 0.19669555770270547-0.06898329440739431im,
                         -0.08497237300850694+0.05491894824021812im, -0.03824811431135421+0.09674411265061583im,
                         0.19090176522668456+0.0925836534293675im, -0.0036002119314218345+0.06525873396755541im,
                         0.6161220314750114, -0.16138772611064953-0.040912777231089686im,
@@ -1056,7 +1056,7 @@ Base.eps(::Type{Complex{R}}) where {R} = 10eps(R)
                     let P=bk.P, U=bk.U, D=bk.D
                         @test P' * U * D * U' * P ≈ Matrix(pm)
                     end
-                    @test inv(bk) ≈ PackedMatrix(n, elty[1.3581916719708789, -0.342956324395737+3.6781189369192617im,
+                    @test inv(bk) ≈ SPMatrix(n, elty[1.3581916719708789, -0.342956324395737+3.6781189369192617im,
                         3.8533309731653227, 0.20466871121679153+2.202713822098123im, 4.362865375776229-3.3131720125104414im,
                         2.0423406471237833, -0.015907782720826935+0.11013170779058595im,
                         -0.26505866835585146+0.8464254222169064im, 0.16221891050532888-0.1545875497136462im,
@@ -1070,7 +1070,7 @@ Base.eps(::Type{Complex{R}}) where {R} = 10eps(R)
                     let P=bk.P, L=bk.L, D=bk.D
                         @test P' * L * D * L' * P ≈ Matrix(pm)
                     end
-                    @test inv(bk) ≈ PackedMatrix(n, elty[1.3581916719708789, -0.3429563243957337-3.6781189369192617im,
+                    @test inv(bk) ≈ SPMatrix(n, elty[1.3581916719708789, -0.3429563243957337-3.6781189369192617im,
                         0.20466871121679364-2.2027138220981217im, -0.01590778272082699-0.11013170779058656im,
                         -2.8397949519940457+1.8646232948832278im, 0.820648332280475-0.034156080112838653im,
                         3.8533309731653227, 4.3628653757762255+3.3131720125104445im, -0.26505866835585-0.846425422216907im,

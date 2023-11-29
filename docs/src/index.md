@@ -1,6 +1,6 @@
 # Introduction
 
-`PackedMatrices` is a Julia package that wraps functions for storing symmetric matrices in their packed form, i.e.,
+`StandardPacked` is a Julia package that wraps functions for storing symmetric matrices in their packed form, i.e.,
 column-wise stacked upper or lower triangles. It also provides bindings for the corresponding LAPACK functions, which allow
 things such as eigendecompositions. Note that typically, the packed form requires a bit longer calculation times and is
 slightly more imprecise than the dense form; however, it requires less storage.

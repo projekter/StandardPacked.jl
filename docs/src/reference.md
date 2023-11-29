@@ -1,27 +1,27 @@
 # Reference
 
 ```@meta
-CurrentModule = PackedMatrices
+CurrentModule = StandardPacked
 ```
 
-## The PackedMatrix type
+## The SPMatrix type
 ```@docs
-PackedMatrix
+SPMatrix
 ```
 
-## Creating a PackedMatrix
+## Creating an SPMatrix
 ```@docs
-PackedMatrix(::Integer, ::AbstractVector{R}, ::Symbol) where {R}
-PackedMatrix{R}(::UndefInitializer, ::Integer, ::Symbol) where {R}
-PackedMatrix(::Symmetric{R,<:AbstractMatrix{R}}) where {R}
+SPMatrix(::Integer, ::AbstractVector{R}, ::Symbol) where {R}
+SPMatrix{R}(::UndefInitializer, ::Integer, ::Symbol) where {R}
+SPMatrix(::Symmetric{R,<:AbstractMatrix{R}}) where {R}
 ```
 
-## Formats of a PackedMatrix
+## Formats of an SPMatrix
 ```@docs
-PackedMatrixUpper
-PackedMatrixLower
-PackedMatrixUnscaled
-PackedMatrixScaled
+SPMatrixUpper
+SPMatrixLower
+SPMatrixUnscaled
+SPMatrixScaled
 packed_isupper
 packed_islower
 packed_isscaled
@@ -33,8 +33,8 @@ packed_unscale!
 ```@docs
 getindex
 setindex!
-vec(::PackedMatrix)
-Matrix{R}(::PackedMatrixUnscaled{R}) where {R}
+vec(::SPMatrix)
+Matrix{R}(::SPMatrixUnscaled{R}) where {R}
 packedsize
 packedside
 ```
@@ -50,7 +50,7 @@ lmul_offdiags!
 
 ## Extensions in LinearAlgebra
 This section documents functions for which the interface provided by `LinearAlgebra` has been extended to cover the
-`PackedMatrix` type. However, since `PackedMatrix` is an `AbstractMatrix`, many more helper and convenience functions are
+`SPMatrix` type. However, since `SPMatrix` is an `AbstractMatrix`, many more helper and convenience functions are
 actually available that will (hopefully) fall back to the efficient implementations documented here.
 ```@docs
 dot

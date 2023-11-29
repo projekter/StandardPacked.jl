@@ -1,8 +1,8 @@
-using Test, Documenter, PackedMatrices
+using Test, Documenter, StandardPacked
 
-@testset "PackedMatrices" begin
+@testset "StandardPacked" begin
     @testset "Documentation" begin
-        doctest(PackedMatrices)
+        doctest(StandardPacked)
     end
-    include("PackedMatrices.jl")
+    include("StandardPacked.jl")
 end

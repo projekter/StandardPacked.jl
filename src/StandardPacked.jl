@@ -1,9 +1,9 @@
 __precompile__()
-module PackedMatrices
+module StandardPacked
 
 using LinearAlgebra, SparseArrays
 
-include("packedmatrix.jl")
+include("SPMatrix.jl")
 include("utils.jl")
 include("lapack.jl")
 include("linalg.jl")

@@ -1,7 +1,7 @@
 using Documenter
-using PackedMatrices
+using StandardPacked
 
-makedocs(sitename="PackedMatrices.jl", modules=[PackedMatrices],
+makedocs(sitename="StandardPacked.jl", modules=[StandardPacked],
     format=Documenter.HTML(prettyurls=false),
     pages=[
         "index.md",
@@ -9,4 +9,4 @@ makedocs(sitename="PackedMatrices.jl", modules=[PackedMatrices],
         "lapack.md"
     ])
 
-deploydocs(repo="github.com/projekter/PackedMatrices.jl.git")
+deploydocs(repo="github.com/projekter/StandardPacked.jl.git")

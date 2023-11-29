@@ -1,44 +1,44 @@
-# idea: allow the PackedMatrix to work either as a vector or as a matrix, depending on the broadcasting context.
+# idea: allow the SPMatrix to work either as a vector or as a matrix, depending on the broadcasting context.
 # However, this doesn't seem to work in all cases, so instead of providing a partially buggy implementation, we default to
-# always treating the PackedMatrix as equivalent to its vector in broadcasting.
+# always treating the SPMatrix as equivalent to its vector in broadcasting.
 # We still perform a check so that we don't combine incompatible formats.
-Base.broadcastable(P::PackedMatrix) = PackedMatrixBroadcasting{typeof(P)}(P)
-struct PackedMatrixBroadcasting{PM<:PackedMatrix} <: AbstractVector{eltype(PM)}
+Base.broadcastable(P::SPMatrix) = SPMatrixBroadcasting{typeof(P)}(P)
+struct SPMatrixBroadcasting{PM<:SPMatrix} <: AbstractVector{eltype(PM)}
     data::PM
 end
-Base.size(PB::PackedMatrixBroadcasting) = size(PB.data.data)
-Base.axes(PB::PackedMatrixBroadcasting) = axes(PB.data.data)
-Base.getindex(PB::PackedMatrixBroadcasting, ind::Int) = PB.data.data[ind]
-Base.setindex!(PB::PackedMatrixBroadcasting, val, ind::Int) = PB.data.data[ind] = val
-#=@inline Broadcast.combine_axes(A::PackedMatrixBroadcasting, B) = try
+Base.size(PB::SPMatrixBroadcasting) = size(PB.data.data)
+Base.axes(PB::SPMatrixBroadcasting) = axes(PB.data.data)
+Base.getindex(PB::SPMatrixBroadcasting, ind::Int) = PB.data.data[ind]
+Base.setindex!(PB::SPMatrixBroadcasting, val, ind::Int) = PB.data.data[ind] = val
+#=@inline Broadcast.combine_axes(A::SPMatrixBroadcasting, B) = try
     return Broadcast.broadcast_shape(axes(A), axes(B))
 catch
     return Broadcast.broadcast_shape(axes(A.data), axes(B))
 end
-@inline Broadcast.combine_axes(A, B::PackedMatrixBroadcasting) = try
+@inline Broadcast.combine_axes(A, B::SPMatrixBroadcasting) = try
     return Broadcast.broadcast_shape(axes(A), axes(B))
 catch
     return Broadcast.broadcast_shape(axes(A), axes(B.data))
 end
-@inline Broadcast.combine_axes(A::PackedMatrixBroadcasting, B::PackedMatrixBroadcasting) = Broadcast.broadcast_shape(axes(A), axes(B))=#
+@inline Broadcast.combine_axes(A::SPMatrixBroadcasting, B::SPMatrixBroadcasting) = Broadcast.broadcast_shape(axes(A), axes(B))=#
 
-struct PackedMatrixStyle{Fmt} <: Broadcast.AbstractArrayStyle{1} end
-PackedMatrixStyle{Fmt}(::Val{1}) where {Fmt} = PackedMatrixStyle{Fmt}()
-PackedMatrixStyle{Fmt}(::Val{2}) where {Fmt} = error("Broadcasting a PackedMatrix will only work on the vectorized data")
-#PackedMatrixStyle{Fmt}(::Val{2}) where {Fmt} = PackedMatrixGenericStyle{Fmt}()
-Base.BroadcastStyle(::Type{<:Union{<:PackedMatrixBroadcasting{<:PackedMatrix{R,V,Fmt} where {R,V}},<:PackedMatrix{R,V,Fmt} where {R,V}}}) where {Fmt} =
-    PackedMatrixStyle{Fmt}()
-Base.similar(bc::Broadcast.Broadcasted{P}, ::Type{T}) where {T,Fmt,P<:PackedMatrixStyle{Fmt}} =
-    PackedMatrix{T}(undef, (isqrt(1 + 8length(bc)) -1) ÷ 2, Fmt)
+struct SPMatrixStyle{Fmt} <: Broadcast.AbstractArrayStyle{1} end
+SPMatrixStyle{Fmt}(::Val{1}) where {Fmt} = SPMatrixStyle{Fmt}()
+SPMatrixStyle{Fmt}(::Val{2}) where {Fmt} = error("Broadcasting an SPMatrix will only work on the vectorized data")
+#SPMatrixStyle{Fmt}(::Val{2}) where {Fmt} = SPMatrixGenericStyle{Fmt}()
+Base.BroadcastStyle(::Type{<:Union{<:SPMatrixBroadcasting{<:SPMatrix{R,V,Fmt} where {R,V}},<:SPMatrix{R,V,Fmt} where {R,V}}}) where {Fmt} =
+    SPMatrixStyle{Fmt}()
+Base.similar(bc::Broadcast.Broadcasted{P}, ::Type{T}) where {T,Fmt,P<:SPMatrixStyle{Fmt}} =
+    SPMatrix{T}(undef, (isqrt(1 + 8length(bc)) -1) ÷ 2, Fmt)
     #=similar(find_pm(bc).data, T)
 find_pm(bc::Base.Broadcast.Broadcasted) = find_pm(bc.args)
 find_pm(args::Tuple) = find_pm(find_pm(args[1]), Base.tail(args))
-find_pm(E::Broadcast.Extruded{<:PackedMatrixBroadcasting}) = E.x
+find_pm(E::Broadcast.Extruded{<:SPMatrixBroadcasting}) = E.x
 find_pm(x) = x
 find_pm(::Tuple{}) = nothing
-find_pm(P::PackedMatrixBroadcasting, ::Any) = P
+find_pm(P::SPMatrixBroadcasting, ::Any) = P
 find_pm(::Any, rest) = find_pm(rest)=#
-@inline function Base.copyto!(dest::PackedMatrix{R,V,Fmt} where {R,V}, bc::Broadcast.Broadcasted{PackedMatrixStyle{Fmt}}) where {Fmt}
+@inline function Base.copyto!(dest::SPMatrix{R,V,Fmt} where {R,V}, bc::Broadcast.Broadcasted{SPMatrixStyle{Fmt}}) where {Fmt}
     axes(dest.data) == axes(bc) || Broadcast.throwdm(axes(dest.data), axes(bc))
     # Performance optimization: broadcast!(identity, dest, A) is equivalent to copyto!(dest, A) if indices match
     if bc.f === identity && bc.args isa Tuple{AbstractArray} # only a single input argument to broadcast!
@@ -55,18 +55,18 @@ find_pm(::Any, rest) = find_pm(rest)=#
     end
     return dest
 end
-Base.Broadcast.materialize!(s::PackedMatrixStyle{Fmt}, dest::PackedMatrix{R,V,Fmt} where {R,V}, bc::Broadcast.Broadcasted{PackedMatrixStyle{Fmt}}) where {Fmt} =
+Base.Broadcast.materialize!(s::SPMatrixStyle{Fmt}, dest::SPMatrix{R,V,Fmt} where {R,V}, bc::Broadcast.Broadcasted{SPMatrixStyle{Fmt}}) where {Fmt} =
     (Base.Broadcast.materialize!(s, dest.data, bc); return dest)
-Base.BroadcastStyle(::PackedMatrixStyle{Fmt}, ::PackedMatrixStyle{Fmt}) where {Fmt} = PackedMatrixStyle{Fmt}()
-Base.BroadcastStyle(::PackedMatrixStyle, ::PackedMatrixStyle) =
+Base.BroadcastStyle(::SPMatrixStyle{Fmt}, ::SPMatrixStyle{Fmt}) where {Fmt} = SPMatrixStyle{Fmt}()
+Base.BroadcastStyle(::SPMatrixStyle, ::SPMatrixStyle) =
     error("Packed matrices with different formats cannot be combined")
-#=struct PackedMatrixGenericStyle{Fmt} <: Broadcast.AbstractArrayStyle{2} end
-PackedMatrixGenericStyle{Fmt}(::Val{1}) where {Fmt} = PackedMatrixStyle{Fmt}()
-PackedMatrixGenericStyle{Fmt}(::Val{2}) where {Fmt} = PackedMatrixGenericStyle{Fmt}()
-Base.BroadcastStyle(::PackedMatrixStyle{Fmt}, ::Broadcast.DefaultArrayStyle{2}) where {Fmt} = PackedMatrixGenericStyle{Fmt}()
-Base.BroadcastStyle(::PackedMatrixGenericStyle{Fmt}, ::Broadcast.DefaultArrayStyle{1}) where {Fmt} = PackedMatrixStyle{Fmt}()
-Base.similar(bc::Broadcast.Broadcasted{<:PackedMatrixGenericStyle}, ::Type{T}) where {T} = similar(Array{T}, axes(bc))
-@inline function Base.copyto!(dest::PackedMatrix{R,V,Fmt} where {R,V}, bc::Broadcast.Broadcasted{PackedMatrixGenericStyle{Fmt}}) where {Fmt}
+#=struct SPMatrixGenericStyle{Fmt} <: Broadcast.AbstractArrayStyle{2} end
+SPMatrixGenericStyle{Fmt}(::Val{1}) where {Fmt} = SPMatrixStyle{Fmt}()
+SPMatrixGenericStyle{Fmt}(::Val{2}) where {Fmt} = SPMatrixGenericStyle{Fmt}()
+Base.BroadcastStyle(::SPMatrixStyle{Fmt}, ::Broadcast.DefaultArrayStyle{2}) where {Fmt} = SPMatrixGenericStyle{Fmt}()
+Base.BroadcastStyle(::SPMatrixGenericStyle{Fmt}, ::Broadcast.DefaultArrayStyle{1}) where {Fmt} = SPMatrixStyle{Fmt}()
+Base.similar(bc::Broadcast.Broadcasted{<:SPMatrixGenericStyle}, ::Type{T}) where {T} = similar(Array{T}, axes(bc))
+@inline function Base.copyto!(dest::SPMatrix{R,V,Fmt} where {R,V}, bc::Broadcast.Broadcasted{SPMatrixGenericStyle{Fmt}}) where {Fmt}
     axes(dest) == axes(bc) || Broadcast.throwdm(axes(dest), axes(bc))
     if bc.f === identity && bc.args isa Tuple{AbstractArray}
         A = bc.args[1]
