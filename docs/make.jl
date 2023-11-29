@@ -8,3 +8,5 @@ makedocs(sitename="PackedMatrices.jl", modules=[PackedMatrices],
         "reference.md",
         "lapack.md"
     ])
+
+deploydocs(repo="github.com/projekter/PackedMatrices.jl.git")
