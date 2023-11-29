@@ -3,7 +3,7 @@ module StandardPacked
 
 using LinearAlgebra, SparseArrays
 
-include("SPMatrix.jl")
+include("spmatrix.jl")
 include("utils.jl")
 include("lapack.jl")
 include("linalg.jl")
