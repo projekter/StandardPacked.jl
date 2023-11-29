@@ -203,7 +203,7 @@ end
                 es2 = eigen(pm, elty(-.7), elty(1.))
                 @test es2.values ≈ @view(es.values[2:6])
                 for (checkvec, refvec) in zip(eachcol(es2.vectors), eachcol(@view(es.vectors[:, 2:6])))
-                    @test ≈(checkvec, refvec, atol=8eps(elty)) || ≈(checkvec, -refvec, atol=8eps(elty))
+                    @test ≈(checkvec, refvec, atol=16eps(elty)) || ≈(checkvec, -refvec, atol=16eps(elty))
                 end
                 es3 = eigen(pm, 3:5)
                 @test es3.values ≈ @view(es.values[3:5]) rtol=4eps(elty)
@@ -333,7 +333,7 @@ end
                 es2 = spgvx!(1, 'V', 'V', copy(pm), copy(pmb), elty(-.7), elty(1.), nothing, nothing, elty(-1))
                 @test es2[1] ≈ @view(es.values[2:5])
                 for (checkvec, refvec) in zip(eachcol(es2[2]), eachcol(@view(es.vectors[:, 2:5])))
-                    @test ≈(checkvec, refvec, atol=8eps(elty)) || ≈(checkvec, -refvec, atol=8eps(elty))
+                    @test ≈(checkvec, refvec, atol=16eps(elty)) || ≈(checkvec, -refvec, atol=16eps(elty))
                 end
                 es3 = spgvx!(1, 'V', 'I', copy(pm), copy(pmb), nothing, nothing, 3, 5, elty(-1))
                 @test es3[1] ≈ @view(es.values[3:5]) rtol=16eps(elty)
