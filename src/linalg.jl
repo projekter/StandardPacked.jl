@@ -368,6 +368,14 @@ This function calls [`spevx!`](@ref) and will forward all additional arguments. 
 a non-allocationg version.
 """
 LinearAlgebra.eigvals(::PackedMatrix, ::UnitRange)
+"""
+    eigvals(AP::PackedMatrix, BP::PackedMatrix, args...)
+
+Compute the generalized eigenvalues of `AP` and `BP`.
+
+See also [`eigen`](@ref).
+"""
+LinearAlgebra.eigvals(AP::PM, BP::PM, args...) where {PM<:PackedMatrix{<:BlasFloat}} = eigvals!(copy(AP), copy(BP), args...)
 
 # for disambiguous methods, we cannot use BlasFloat here
 LinearAlgebra.eigvals!(P::PackedMatrix{T}, args...) where {R<:BlasReal,T<:MaybeComplex{R}} = spevd!('N', P, args...)
@@ -375,6 +383,8 @@ LinearAlgebra.eigvals!(P::PackedMatrix{T}, vl::R, vu::R, args...) where {R<:Blas
     spevx!('N', 'V', P, vl, vu, nothing, nothing, -one(R), args...)
 LinearAlgebra.eigvals!(P::PackedMatrix{T}, range::UnitRange, args...) where {R<:BlasReal,T<:MaybeComplex{R}} =
     spevx!('N', 'I', P, nothing, nothing, range.start, range.stop, -one(_realtype(eltype(P))), args...)
+LinearAlgebra.eigvals!(AP::PackedMatrix{T}, BP::PackedMatrix{T}, args...) where {T<:BlasFloat} =
+    spgvd!(1, 'N', AP, BP, args...)[1]
 """
     eigvals!(P::PackedMatrix, args...)
     eigvals!(P::PackedMatrix, vl::Real, vu::Real, args...)
@@ -509,6 +519,8 @@ function LinearAlgebra.eigen!(P::PackedMatrix{T}, vl::R, vu::R, args...) where {
     chklapackerror(info)
     return Eigen(W, Z)
 end
+LinearAlgebra.eigen!(AP::PackedMatrix{T}, BP::PackedMatrix{T}, args...) where {T<:BlasFloat} =
+    GeneralizedEigen(spgvd!(1, 'V', AP, BP, args...)[1:2]...)
 
 
 """
