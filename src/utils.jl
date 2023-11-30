@@ -94,6 +94,7 @@ Base.IteratorSize(::Type{SPDiagonalIterator}) = Base.HasLength()
 Base.IteratorEltype(::Type{SPDiagonalIterator}) = Base.HasEltype()
 Base.eltype(::SPDiagonalIterator) = Int
 Base.length(iter::SPDiagonalIterator) = iter.dim - iter.k
+Base.@deprecate_binding PackedDiagonalIterator SPDiagonalIterator
 
 
 """
