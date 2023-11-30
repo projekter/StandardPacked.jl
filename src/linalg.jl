@@ -14,7 +14,7 @@ function LinearAlgebra.dot(A::SPMatrix{R1,V,Fmt} where {V}, B::SPMatrix{R2,V,Fmt
         return dot(A.data, B.data)
     else
         result = zero(promote_type(R1, R2))
-        diags = PackedDiagonalIterator(A)
+        diags = SPDiagonalIterator(A)
         cur_diag = iterate(diags)
         i = 1
         @inbounds while !isnothing(cur_diag)
@@ -36,7 +36,7 @@ function LinearAlgebra.dot(A::SPMatrix{R1,<:SparseVector,Fmt}, B::SPMatrix{R2,V,
         result = zero(promote_type(R1, R2))
         nzs = rowvals(A.data)
         vs = nonzeros(A.data)
-        diags = PackedDiagonalIterator(A)
+        diags = SPDiagonalIterator(A)
         cur_diag = iterate(diags)
         isnothing(cur_diag) && return result
         @inbounds for i in 1:length(nzs) # for @simd, cannot iterate over (j, v)
@@ -72,7 +72,7 @@ function LinearAlgebra.dot(A::SPMatrix{R1,<:SparseVector,Fmt}, B::SPMatrix{R2,<:
         iBmax = length(nzB)
         iA = 1
         iB = 1
-        diags = PackedDiagonalIterator(A)
+        diags = SPDiagonalIterator(A)
         cur_diag = iterate(diags)
         isnothing(cur_diag) && return result
         @inbounds while iA ≤ iAmax && iB ≤ iBmax
@@ -164,7 +164,7 @@ The same as [`cholesky`](@ref), but saves space by overwriting the input `P`, in
 function LinearAlgebra.cholesky!(P::SPMatrix{T}, ::NoPivot=NoPivot(); shift::R=zero(R),
     check::Bool=true) where {R<:BlasReal,T<:MaybeComplex{R}}
     if !iszero(shift)
-        for i in PackedDiagonalIterator(P)
+        for i in SPDiagonalIterator(P)
             @inbounds P[i] += shift
         end
     end
@@ -528,19 +528,19 @@ LinearAlgebra.eigen!(AP::SPMatrix{T}, BP::SPMatrix{T}, args...) where {T<:BlasFl
 
 A vector containing the indices of the `k`the diagonal of the packed matrix `P`.
 
-See also: [`diag`](@ref), [`PackedDiagonalIterator`](@ref).
+See also: [`diag`](@ref), [`SPDiagonalIterator`](@ref).
 """
-LinearAlgebra.diagind(P::SPMatrix, k::Integer=0) = collect(PackedDiagonalIterator(P, k))
+LinearAlgebra.diagind(P::SPMatrix, k::Integer=0) = collect(SPDiagonalIterator(P, k))
 
 """
     diag(P::SPMatrix, k::Integer=0)
 
 The `k`th diagonal of a packed matrix, as a vector.
 
-See also: [`diagind`](@ref), [`PackedDiagonalIterator`](@ref).
+See also: [`diagind`](@ref), [`SPDiagonalIterator`](@ref).
 """
 function LinearAlgebra.diag(P::SPMatrix{R}, k::Integer=0) where {R}
-    iter = PackedDiagonalIterator(P, k)
+    iter = SPDiagonalIterator(P, k)
     diagonal = Vector{R}(undef, length(iter))
     for (i, idx) in enumerate(iter)
         @inbounds diagonal[i] = P[idx]
@@ -551,7 +551,7 @@ end
 
 function normapply(f, P::SPMatrix{R}, init::T=zero(_realtype(R))) where {R,T}
     result::T = init
-    diags = PackedDiagonalIterator(P)
+    diags = SPDiagonalIterator(P)
     cur_diag = iterate(diags)
     i = 1
     @inbounds while !isnothing(cur_diag)
@@ -571,7 +571,7 @@ end
 function normapply(f, P::SPMatrix{R,<:SparseVector}) where {R}
     nzs = rowvals(P.data)
     vs = nonzeros(P.data)
-    diags = PackedDiagonalIterator(P)
+    diags = SPDiagonalIterator(P)
     cur_diag = iterate(diags)
     isnothing(cur_diag) && return zero(R)
     result = zero(_realtype(R))
@@ -634,7 +634,7 @@ Matrix trace. Sums the diagonal elements of `P`.
 """
 function LinearAlgebra.tr(P::SPMatrix{R}) where {R}
     trace = zero(R)
-    for idx in PackedDiagonalIterator(P)
+    for idx in SPDiagonalIterator(P)
         @inbounds trace += P[idx]
     end
     return trace

@@ -1,4 +1,4 @@
-export packedsize, packedside, PackedDiagonalIterator, rmul_diags!, rmul_offdiags!, lmul_diags!, lmul_offdiags!
+export packedsize, packedside, SPDiagonalIterator, rmul_diags!, rmul_offdiags!, lmul_diags!, lmul_offdiags!
 
 @doc raw"""
     packedsize(dim::Integer)
@@ -41,22 +41,22 @@ end
 end
 
 """
-    PackedDiagonalIterator(P::SPMatrix, k=0)
-    PackedDiagonalIterator(fmt::Symbol, dim, k=0)
+    SPDiagonalIterator(P::SPMatrix, k=0)
+    SPDiagonalIterator(fmt::Symbol, dim, k=0)
 
 Creates an iterator that returns the linear indices for iterating through the `k`th diagonal of a packed matrix.
 """
-struct PackedDiagonalIterator{Fmt}
+struct SPDiagonalIterator{Fmt}
     dim::Int
     k::UInt
-    PackedDiagonalIterator(P::SPMatrixUpper, k=0) = new{:U}(P.dim, abs(k))
-    PackedDiagonalIterator(P::SPMatrixLower, k=0) = new{:L}(P.dim, abs(k))
-    function PackedDiagonalIterator(fmt::Symbol, dim, k=0)
+    SPDiagonalIterator(P::SPMatrixUpper, k=0) = new{:U}(P.dim, abs(k))
+    SPDiagonalIterator(P::SPMatrixLower, k=0) = new{:L}(P.dim, abs(k))
+    function SPDiagonalIterator(fmt::Symbol, dim, k=0)
         fmt === :U || fmt === :L || error("Invalid symbol for diagonal iterator construction")
         new{fmt}(dim, abs(k))
     end
 end
-function Base.iterate(iter::PackedDiagonalIterator{:U})
+function Base.iterate(iter::SPDiagonalIterator{:U})
     if iter.k ≥ iter.dim
         return nothing
     else
@@ -64,7 +64,7 @@ function Base.iterate(iter::PackedDiagonalIterator{:U})
         return j, (j, iter.k +2)
     end
 end
-function Base.iterate(iter::PackedDiagonalIterator{:L})
+function Base.iterate(iter::SPDiagonalIterator{:L})
     if iter.k ≥ iter.dim
         return nothing
     else
@@ -72,7 +72,7 @@ function Base.iterate(iter::PackedDiagonalIterator{:L})
         return j, (j, iter.dim)
     end
 end
-function Base.iterate(iter::PackedDiagonalIterator{:U}, state)
+function Base.iterate(iter::SPDiagonalIterator{:U}, state)
     j, δ = state
     j += δ
     if δ > iter.dim
@@ -81,7 +81,7 @@ function Base.iterate(iter::PackedDiagonalIterator{:U}, state)
         return j, (j, δ +1)
     end
 end
-function Base.iterate(::PackedDiagonalIterator{:L}, state)
+function Base.iterate(::SPDiagonalIterator{:L}, state)
     j, δ = state
     if isone(δ)
         return nothing
@@ -90,10 +90,10 @@ function Base.iterate(::PackedDiagonalIterator{:L}, state)
         return j, (j, δ -1)
     end
 end
-Base.IteratorSize(::Type{PackedDiagonalIterator}) = Base.HasLength()
-Base.IteratorEltype(::Type{PackedDiagonalIterator}) = Base.HasEltype()
-Base.eltype(::PackedDiagonalIterator) = Int
-Base.length(iter::PackedDiagonalIterator) = iter.dim - iter.k
+Base.IteratorSize(::Type{SPDiagonalIterator}) = Base.HasLength()
+Base.IteratorEltype(::Type{SPDiagonalIterator}) = Base.HasEltype()
+Base.eltype(::SPDiagonalIterator) = Int
+Base.length(iter::SPDiagonalIterator) = iter.dim - iter.k
 
 
 """
@@ -105,7 +105,7 @@ See also [`lmul_diags!`](@ref), [`rmul_offdiags!`](@ref), [`lmul_offdiags!`](@re
 """
 function rmul_diags!(P::SPMatrix, factor)
     data = P.data
-    for i in PackedDiagonalIterator(P)
+    for i in SPDiagonalIterator(P)
         @inbounds data[i] = data[i] * factor
     end
     return P
@@ -118,7 +118,7 @@ Right-multiplies all off-diagonal entries in `P` by `factor`. Returns `P`.
 See also [`rmul_diags!`](@ref), [`lmul_diags!`](@ref), [`lmul_offdiags!`](@ref).
 """
 function rmul_offdiags!(P::SPMatrix, factor)
-    diags = PackedDiagonalIterator(P)
+    diags = SPDiagonalIterator(P)
     data = P.data
     for (d₁, d₂) in zip(diags, Iterators.drop(diags, 1))
         @inbounds rmul!(@view(data[d₁+1:d₂-1]), factor)
@@ -134,7 +134,7 @@ See also [`rmul_diags!`](@ref), [`rmul_offdiags!`](@ref), [`lmul_offdiags!`](@re
 """
 function lmul_diags!(factor, P::SPMatrix)
     data = P.data
-    for i in PackedDiagonalIterator(P)
+    for i in SPDiagonalIterator(P)
         @inbounds data[i] = factor * data[i]
     end
     return P
@@ -147,7 +147,7 @@ Left-multiplies all diagonal entries in `P` by `factor`. Returns `P`.
 See also [`rmul_diags!`](@ref), [`rmul_offdiags!`](@ref), [`lmul_diags!`](@ref).
 """
 function lmul_offdiags!(factor, P::SPMatrix)
-    diags = PackedDiagonalIterator(P)
+    diags = SPDiagonalIterator(P)
     data = P.data
     for (d₁, d₂) in zip(diags, Iterators.drop(diags, 1))
         @inbounds lmul!(factor, @view(data[d₁+1:d₂-1]))

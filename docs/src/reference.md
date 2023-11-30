@@ -41,7 +41,7 @@ packedside
 
 ## Diagonal and off-diagonal elements
 ```@docs
-PackedDiagonalIterator
+SPDiagonalIterator
 rmul_diags!
 rmul_offdiags!
 lmul_diags!
