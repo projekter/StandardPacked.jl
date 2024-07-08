@@ -2,6 +2,7 @@ using Test
 using StandardPacked
 using LinearAlgebra, SparseArrays
 using Base: _realtype
+using StaticArrays
 
 setprecision(8)
 
@@ -1085,3 +1086,15 @@ Base.eps(::Type{Complex{R}}) where {R} = 10eps(R)
         end
     end
 end end
+
+@testset "StaticArrays broadcasting" begin
+    base = collect(1:16)
+    pm = SPMatrix(4, @view(base[1:packedsize(4)]))
+    s = SMatrix{4,4}([100 200 300 400; 500 600 700 800; 900 1000 1100 1200; 1300 1400 1500 1600])
+    pm .= s
+    @test base == [100, 200, 600, 300, 700, 1100, 400, 800, 1200, 1600, 11, 12, 13, 14, 15, 16]
+    copyto!(base, 1:16)
+    pm2 = SPMatrix(4, @view(base[1:packedsize(4)]), :L)
+    pm2 .= s
+    @test base == [100, 500, 900, 1300, 600, 1000, 1400, 1100, 1500, 1600, 11, 12, 13, 14, 15, 16]
+end
