@@ -146,6 +146,14 @@ packed_unscale!(P::SPMatrixScaled{R}) where {R} =
     rmul_offdiags!(SPMatrix(P.dim, P.data, packed_isupper(P) ? :U : :L), sqrt(inv(R(2))))
 packed_unscale!(P::SPMatrixUnscaled) = P
 
+@inline function Base._to_linear_index(P::SPMatrix{<:Any,<:Any,Fmt}, row::Integer, col::Integer) where {Fmt}
+    if (Fmt === :U || Fmt === :US ? Base.:≤ : Base.:≥)(row, col)
+        return @inbounds rowcol_to_vec(P, row, col)
+    else
+        return @inbounds rowcol_to_vec(P, col, row)
+    end
+end
+
 """
     P[idx]
 
