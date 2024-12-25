@@ -788,24 +788,36 @@ macro pmalso(scaled, fun=nothing)
     end)
 end
 
+"""
+    spmv!(α, AP::SPMatrixUnscaled, x, β)
+"""
 spmv!(α::Real, AP::SPMatrixUnscaled, args...) = spmv!(packed_ulchar(AP), α, vec(AP), args...)
-@doc replace(@doc(spmv!).meta[:results][1].text[1],
-    "    spmv!(uplo, α, AP, x, β, y)" => "    spmv!(uplo, α, AP::AbstractVector, x, β, y)
-    spmv!(α, AP::SPMatrixUnscaled, x, β, y)") spmv!
+# The following replacements are broken in 1.11. While @doc(spmv!) returns a Markdown.MD object when tested, it appears that
+# during precompilation, it instead gives a DocStr, which does not have meta. Until we figure out a better way, use the poor
+# man's substitute docs.
+# @doc replace(@doc(spmv!).meta[:results][1].text[1],
+#     "    spmv!(uplo, α, AP, x, β, y)" => "    spmv!(uplo, α, AP::AbstractVector, x, β, y)
+#     spmv!(α, AP::SPMatrixUnscaled, x, β, y)") spmv!
 
+"""
+    hpmv!(α, AP::SPMatrixUnscaled, x, β, y)
+"""
 hpmv!(α::Number, AP::SPMatrixUnscaled, args...) = hpmv!(packed_ulchar(AP), α, vec(AP), args...)
-@doc replace(@doc(spmv!).meta[:results][1].text[1],
-    "    hpmv!(uplo, α, AP, x, β, y)" => "    hpmv!(uplo, α, AP::AbstractVector, x, β, y)
-    hpmv!(α, AP::SPMatrixUnscaled, x, β, y)") hpmv!
+# @doc replace(@doc(spmv!).meta[:results][1].text[1],
+#     "    hpmv!(uplo, α, AP, x, β, y)" => "    hpmv!(uplo, α, AP::AbstractVector, x, β, y)
+#     hpmv!(α, AP::SPMatrixUnscaled, x, β, y)") hpmv!
 
+"""
+    spr!(α, x, AP::SPMatrix)$warnunscale
+"""
 function spr!(α::Real, x::AbstractArray{T}, AP::SPMatrix{T}) where {T<:BlasReal}
     AP = packed_unscale!(AP)
     spr!(packed_ulchar(AP), α, x, vec(AP))
     return AP
 end
-@doc (replace(@doc(spr!).meta[:results][1].text[1],
-    "    spr!(uplo, α, x, AP)" => "    spr!(uplo, α, x, AP::AbstractVector)
-    spr!(α, x, AP::SPMatrix)") * warnunscale) spr!
+# @doc (replace(@doc(spr!).meta[:results][1].text[1],
+#     "    spr!(uplo, α, x, AP)" => "    spr!(uplo, α, x, AP::AbstractVector)
+#     spr!(α, x, AP::SPMatrix)") * warnunscale) spr!
 
 @pmalso :unscale function hpr!(uplo::AbstractChar, α::Real, x::AbstractVector{T}, AP::PM{T}) where {T<:BlasComplex}
     require_one_based_indexing(APv, x)
