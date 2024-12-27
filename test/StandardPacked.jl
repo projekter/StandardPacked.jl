@@ -1098,3 +1098,11 @@ end end
     pm2 .= s
     @test base == [100, 500, 900, 1300, 600, 1000, 1400, 1100, 1500, 1600, 11, 12, 13, 14, 15, 16]
 end
+
+@testset "Reshaping" begin
+    pm = SPMatrix(6, 1:21)
+    resh = reshape(pm, (2, 3, 3, 2))
+    for l in 1:2, k in 1:3, j in 1:3, i in 1:2
+        @test resh[i, j, k, l] == pm[(i-1)+2*(j-1)+1,(k-1)+3*(l-1)+1]
+    end
+end

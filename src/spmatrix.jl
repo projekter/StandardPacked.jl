@@ -322,6 +322,11 @@ end
 Base.convert(T::Type{<:Ptr}, P::SPMatrix) = convert(T, P.data)
 Base.unsafe_convert(T::Type{Ptr{R}}, P::SPMatrix{R}) where {R} = Base.unsafe_convert(T, P.data)
 Base.reshape(P::SPMatrix, ::Val{1}) = P.data # controversial? But it allows taking views with linear indices appropriately.
+function Base._reshape(parent::SPMatrix, dims::Dims)
+    n = parent.dim^2
+    prod(dims) == n || Base._throw_dmrs(n, "size", dims)
+    return Base.__reshape((parent, IndexCartesian()), dims)
+end
 """
     vec(P::SPMatrix)
 
