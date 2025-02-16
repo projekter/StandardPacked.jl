@@ -237,6 +237,7 @@ Base.@propagate_inbounds function Base.setindex!(P::SPMatrix{R,V,:LS}, X, row, c
     return X
 end
 Base.IndexStyle(::SPMatrix) = IndexLinear()
+Base.LinearIndices(P::SPMatrix) = LinearIndices(P.data)
 Base.IteratorSize(::Type{<:SPMatrix}) = Base.HasLength()
 Base.iterate(P::SPMatrix, args...) = iterate(P.data, args...)
 Base.length(P::SPMatrix) = length(P.data)
