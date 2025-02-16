@@ -1,7 +1,7 @@
 name = "StandardPacked"
 uuid = "65f29c17-9e56-4606-972f-81e04007695c"
 authors = ["Benjamin Desef <projekter-git@yahoo.de>"]
-version = "1.0.5"
+version = "1.0.6"
 
 [deps]
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
