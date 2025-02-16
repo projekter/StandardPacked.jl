@@ -335,35 +335,52 @@ Returns the vectorized data associated with `P`. Note that this returns the actu
 """
 LinearAlgebra.vec(P::SPMatrix) = P.data
 
-function Base.convert(::Type{Matrix{R}}, P::SPMatrixUnscaled{R}) where {R}
-    result = Matrix{R}(undef, P.dim, P.dim)
-    tpttr!(packed_ulchar(P), P.data, result)
-    return result
-end
-function Base.convert(::Type{Matrix{R}}, P::SPMatrix{R,V,:US}) where {R,V}
-    result = Matrix{R}(undef, P.dim, P.dim)
-    tpttr!('U', P.data, result)
-    for j in 2:P.dim
-        @inbounds rmul!(@view(result[1:j-1, j]), sqrt(inv(R(2))))
+for (cmp, cp, what) in ((:(==), :copy!, :dst), (:(≥), :copyto!, :(view(dst, 1:src.dim, 1:src.dim))))
+    @eval begin
+        # We support copying into symmetric/Hermitian matrices if they have exactly the same uplo structure
+        @inline function Base.$cp(dst::AbstractMatrix{R}, src::SPMatrixUnscaled{R}) where {R}
+            @boundscheck ($cmp(size(dst, 1), src.dim) && $cmp(size(dst, 2), src.dim)) ||
+                throw(DimensionMismatch("Matrices must have compatible sizes"))
+            sym = dst isa LinearAlgebra.RealHermSymComplexHerm && dst.uplo == packed_ulchar(src)
+            tpttr!(packed_ulchar(src), src.data, sym ? parent(dst) : dst)
+            sym || @inbounds LinearAlgebra.copytri!($what, packed_ulchar(src), true, false)
+            return dst
+        end
+        @inline function Base.$cp(dst::AbstractMatrix{R}, src::SPMatrix{R,V,:US}) where {R,V}
+            @boundscheck ($cmp(size(dst, 1), src.dim) && $cmp(size(dst, 2), src.dim)) ||
+                throw(DimensionMismatch("Matrices must have compatible sizes"))
+            sym = dst isa LinearAlgebra.RealHermSymComplexHerm && dst.uplo == 'U'
+            pdst = sym ? parent(dst) : dst
+            tpttr!('U', src.data, pdst)
+            for j in 2:src.dim
+                @inbounds rmul!(@view(pdst[1:j-1, j]), sqrt(inv(R(2))))
+            end
+            sym || @inbounds LinearAlgebra.copytri!($what, 'U', true, false)
+            return dst
+        end
+        @inline function Base.$cp(dst::AbstractMatrix{R}, src::SPMatrix{R,V,:LS}) where {R,V}
+            @boundscheck ($cmp(size(dst, 1), src.dim) && $cmp(size(dst, 2), src.dim)) ||
+                throw(DimensionMismatch("Matrices must have compatible sizes"))
+            sym = dst isa LinearAlgebra.RealHermSymComplexHerm && dst.uplo == 'L'
+            pdst = sym ? parent(dst) : dst
+            tpttr!('L', src.data, pdst)
+            for j in 1:src.dim-1
+                @inbounds rmul!(@view(pdst[j+1:end, j]), sqrt(inv(R(2))))
+            end
+            sym || @inbounds LinearAlgebra.copytri!($what, 'L', true, false)
+            return dst
+        end
     end
-    return result
 end
-function Base.convert(::Type{Matrix{R}}, P::SPMatrix{R,V,:LS}) where {R,V}
-    result = Matrix{R}(undef, P.dim, P.dim)
-    tpttr!('L', P.data, result)
-    for j in 1:P.dim-1
-        @inbounds rmul!(@view(result[j+1:end, j]), sqrt(inv(R(2))))
-    end
-    return result
-end
+Base.convert(::Type{Matrix{R}}, P::SPMatrix{R}) where {R} = @inbounds copy!(Matrix{R}(undef, P.dim, P.dim), P)
 """
     Matrix{R}(P::SPMatrix{R}, viewtype=R isa Complex ? Hermitian : Symmetric) where {R}
 
 Construct a dense matrix from a packed matrix. The parameter `symmetric` determines which kind of view is returned. Use
-`convert(Matrix{R}, SPMatrix{R})` to return the matrix itself.
+`convert(Matrix{R}, SPMatrix{R})` to return the matrix itself the opposite triangle explicitly filled.
 """
 Base.Matrix{R}(P::SPMatrix{R}, viewtype=R <: Complex ? Hermitian : Symmetric) where {R} =
-    viewtype(convert(Matrix{R}, P), packed_isupper(P) ? :U : :L)
+    @inbounds copy!(viewtype(Matrix{R}(undef, P.dim, P.dim), packed_isupper(P) ? :U : :L), P)
 """
     SPMatrix(A::Union{<:Hermitian,<:Symmetric})
 
