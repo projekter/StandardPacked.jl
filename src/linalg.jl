@@ -595,7 +595,8 @@ function normapply(f, P::SPMatrix{R,<:SparseVector}) where {R}
 end
 LinearAlgebra.norm2(P::SPMatrixUnscaled) = sqrt(normapply((Σ, x, diag) -> Σ + (diag ? norm(x)^2 : 2norm(x)^2), P))
 LinearAlgebra.norm2(P::SPMatrixScaled) = LinearAlgebra.norm2(P.data)
-LinearAlgebra.norm2(P::SPMatrixScaled{R,<:SparseVector} where {R}) = LinearAlgebra.norm2(nonzeros(P.data))
+LinearAlgebra.norm2(P::SPMatrixScaled{R,<:SparseVector}) where {R} =
+    iszero(nnz(P.data)) ? zero(R) : LinearAlgebra.norm2(nonzeros(P.data))
 LinearAlgebra.norm1(P::SPMatrix) = normapply((Σ, x, diag) -> Σ + (diag ? norm(x) : 2norm(x)), P)
 LinearAlgebra.normInf(P::SPMatrixUnscaled) = LinearAlgebra.normInf(P.data)
 LinearAlgebra.normInf(P::SPMatrixScaled) = normapply((m, x, diag) -> max(m, norm(x)), P)
