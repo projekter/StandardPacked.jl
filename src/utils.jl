@@ -31,11 +31,11 @@ Base.@propagate_inbounds packedside(AP::AbstractVector) = packedside(length(AP))
 packedside(P::SPMatrix) = P.dim
 
 
-@inline function rowcol_to_vec(P::SPMatrixUpper, row, col)
+@inline function rowcol_to_vec(P::SPMatrixUpper, row::Integer, col::Integer)
     @boundscheck(1 ≤ row ≤ col || throw(BoundsError(P, (row, col))))
     return col * (col -1) ÷ 2 + row
 end
-@inline function rowcol_to_vec(P::SPMatrixLower, row, col)
+@inline function rowcol_to_vec(P::SPMatrixLower, row::Integer, col::Integer)
     @boundscheck(1 ≤ col ≤ row || throw(BoundsError(P, (row, col))))
     return (2P.dim - col) * (col -1) ÷ 2 + row
 end

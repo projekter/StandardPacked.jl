@@ -159,16 +159,16 @@ end
 
 Returns the value that is stored at the position `idx` in the vectorized (possibly scaled) representation of `P`.
 """
-Base.@propagate_inbounds Base.getindex(P::SPMatrix, idx) = P.data[idx]
+Base.@propagate_inbounds Base.getindex(P::SPMatrix, idx::Union{<:Integer,<:AbstractRange,Colon}) = P.data[idx]
 """
     P[row, col]
 
 Returns the value that is stored in the given row and column of `P`. This corresponds to the value in the matrix, so even if
 `P` is of a scaled type, this does not affect the result.
 """
-Base.@propagate_inbounds Base.getindex(P::SPMatrix{R,V,:U}, row, col) where {R,V} =
+Base.@propagate_inbounds Base.getindex(P::SPMatrix{R,V,:U}, row::Integer, col::Integer) where {R,V} =
     row ≤ col ? P.data[@inbounds rowcol_to_vec(P, row, col)] : conj(P.data[@inbounds rowcol_to_vec(P, col, row)])
-Base.@propagate_inbounds function Base.getindex(P::SPMatrix{R,V,:US}, row, col) where {R,V}
+Base.@propagate_inbounds function Base.getindex(P::SPMatrix{R,V,:US}, row::Integer, col::Integer) where {R,V}
     if row < col
         return sqrt(inv(R(2))) * P.data[@inbounds rowcol_to_vec(P, row, col)]
     elseif row == col
@@ -177,9 +177,9 @@ Base.@propagate_inbounds function Base.getindex(P::SPMatrix{R,V,:US}, row, col) 
         return sqrt(inv(R(2))) * conj(P.data[@inbounds rowcol_to_vec(P, col, row)])
     end
 end
-Base.@propagate_inbounds Base.getindex(P::SPMatrix{R,V,:L}, row, col) where {R,V} =
+Base.@propagate_inbounds Base.getindex(P::SPMatrix{R,V,:L}, row::Integer, col::Integer) where {R,V} =
     col ≤ row ? P.data[@inbounds rowcol_to_vec(P, row, col)] : conj(P.data[@inbounds rowcol_to_vec(P, col, row)])
-Base.@propagate_inbounds function Base.getindex(P::SPMatrix{R,V,:LS}, row, col) where {R,V}
+Base.@propagate_inbounds function Base.getindex(P::SPMatrix{R,V,:LS}, row::Integer, col::Integer) where {R,V}
     if row > col
         return sqrt(inv(R(2))) * P.data[@inbounds rowcol_to_vec(P, row, col)]
     elseif row == col
@@ -200,7 +200,7 @@ Base.@propagate_inbounds Base.setindex!(P::SPMatrix, X, idx::Union{Integer,Linea
 Sets the value that is stored in the given row and column of `P`. This corresponds to the value in the matrix, so if `P` is of
 a scaled type, `X` will internally be multiplied by ``\sqrt2``.
 """
-Base.@propagate_inbounds function Base.setindex!(P::SPMatrix{R,V,:U}, X, row, col) where {R,V}
+Base.@propagate_inbounds function Base.setindex!(P::SPMatrix{R,V,:U}, X, row::Integer, col::Integer) where {R,V}
     if row ≤ col
         P.data[@inbounds rowcol_to_vec(P, row, col)] = X
     else
@@ -208,7 +208,7 @@ Base.@propagate_inbounds function Base.setindex!(P::SPMatrix{R,V,:U}, X, row, co
     end
     return X
 end
-Base.@propagate_inbounds function Base.setindex!(P::SPMatrix{R,V,:US}, X, row, col) where {R,V}
+Base.@propagate_inbounds function Base.setindex!(P::SPMatrix{R,V,:US}, X, row::Integer, col::Integer) where {R,V}
     if row < col
         P.data[@inbounds rowcol_to_vec(P, row, col)] = sqrt(R(2)) * X
     elseif row == col
@@ -218,7 +218,7 @@ Base.@propagate_inbounds function Base.setindex!(P::SPMatrix{R,V,:US}, X, row, c
     end
     return X
 end
-Base.@propagate_inbounds function Base.setindex!(P::SPMatrix{R,V,:L}, X, row, col) where {R,V}
+Base.@propagate_inbounds function Base.setindex!(P::SPMatrix{R,V,:L}, X, row::Integer, col::Integer) where {R,V}
     if row ≥ col
         P.data[@inbounds rowcol_to_vec(P, row, col)] = X
     else
@@ -226,7 +226,7 @@ Base.@propagate_inbounds function Base.setindex!(P::SPMatrix{R,V,:L}, X, row, co
     end
     return X
 end
-Base.@propagate_inbounds function Base.setindex!(P::SPMatrix{R,V,:LS}, X, row, col) where {R,V}
+Base.@propagate_inbounds function Base.setindex!(P::SPMatrix{R,V,:LS}, X, row::Integer, col::Integer) where {R,V}
     if row > col
         P.data[@inbounds rowcol_to_vec(P, row, col)] = sqrt(R(2)) * X
     elseif row == col
