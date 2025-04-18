@@ -260,7 +260,7 @@ end
                 @test eigvals(pm, elty(-.7), elty(1.), evstore, Vector{elty}(undef, 8n), Vector{Int}(undef, 5n)) ≈ @view(es.values[2:6])
                 @test all(x -> x == elty(42.), @view(evstore[6:end]))
                 # spevx index range
-                @test_throws DimensionMismatch eigvals!(pm, 3:5, Vector{elty}(undef, 2))
+                @test_throws DimensionMismatch eigvals!(pm, 3:5, Vector{elty}(undef, 3))
                 # spevx total
                 @test_throws DimensionMismatch spevx!('N', 'A', pm, nothing, nothing, nothing, nothing, elty(-1),
                     Vector{elty}(undef, n -1))
@@ -301,7 +301,7 @@ end
                 @test all(x -> x == elty(42.), @view(evstore[6:end]))
                 @test all(x -> x == elty(42.), @view(evecstore[:, 6:end]))
                 # spevx index range
-                @test_throws DimensionMismatch eigen!(pm, 3:5, Vector{elty}(undef, 2))
+                @test_throws DimensionMismatch eigen!(pm, 3:5, Vector{elty}(undef, 3))
                 @test_throws DimensionMismatch eigen!(pm, 3:5, missing, Matrix{elty}(undef, n, 2))
                 # spevx total
                 @test_throws DimensionMismatch spevx!('V', 'A', pm, nothing, nothing, nothing, nothing, elty(-1),

@@ -1285,14 +1285,9 @@ spevx!(jobz::Val, AP::SPMatrix) =
     chkstride1(APv)
     n = packedside(AP)
     if ismissing(W)
-        W = Vector{T}(undef, range == 'I' ? iu - il + 1 : n)
+        W = Vector{T}(undef, n)
     else
-        if range == 'A'
-            length(W) ≥ n || throw(DimensionMismatch("W has length $(length(W)), but needs at least $n"))
-        elseif range == 'I'
-            length(W) ≥ iu - il +1 || throw(DimensionMismatch("W has length $(length(W)), but needs at least $(iu - il +1)"))
-        end
-        # we cannot check 'V'
+        length(W) ≥ n || throw(DimensionMismatch("W has length $(length(W)), but needs at least $n"))
         require_one_based_indexing(W)
         chkstride1(W)
     end
@@ -1331,14 +1326,9 @@ end
     chkstride1(APv)
     n = packedside(AP)
     if ismissing(W)
-        W = Vector{T}(undef, range == 'I' ? iu - il + 1 : n)
+        W = Vector{T}(undef, n)
     else
-        if range == 'A'
-            length(W) ≥ n || throw(DimensionMismatch("W has length $(length(W)), but needs at least $n"))
-        elseif range == 'I'
-            length(W) ≥ iu - il +1 || throw(DimensionMismatch("W has length $(length(W)), but needs at least $(iu - il +1)"))
-        end
-        # we cannot check 'V'
+        length(W) ≥ n || throw(DimensionMismatch("W has length $(length(W)), but needs at least $n"))
         require_one_based_indexing(W)
         chkstride1(W)
     end
@@ -1396,14 +1386,9 @@ end
     chkstride1(APv)
     n = packedside(AP)
     if ismissing(W)
-        W = Vector{R}(undef, range == 'I' ? iu - il + 1 : n)
+        W = Vector{R}(undef, n)
     else
-        if range == 'A'
-            length(W) ≥ n || throw(DimensionMismatch("W has length $(length(W)), but needs at least $n"))
-        elseif range == 'I'
-            length(W) ≥ iu - il +1 || throw(DimensionMismatch("W has length $(length(W)), but needs at least $(iu - il +1)"))
-        end
-        # we cannot check 'V'
+        length(W) ≥ n || throw(DimensionMismatch("W has length $(length(W)), but needs at least $n"))
         require_one_based_indexing(W)
         chkstride1(W)
     end
@@ -1451,12 +1436,7 @@ end
     if ismissing(W)
         W = Vector{R}(undef, range == 'I' ? iu - il + 1 : n)
     else
-        if range == 'A'
-            length(W) ≥ n || throw(DimensionMismatch("W has length $(length(W)), but needs at least $n"))
-        elseif range == 'I'
-            length(W) ≥ iu - il +1 || throw(DimensionMismatch("W has length $(length(W)), but needs at least $(iu - il +1)"))
-        end
-        # we cannot check 'V'
+        length(W) ≥ n || throw(DimensionMismatch("W has length $(length(W)), but needs at least $n"))
         require_one_based_indexing(W)
         chkstride1(W)
     end
