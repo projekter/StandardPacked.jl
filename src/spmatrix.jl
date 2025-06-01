@@ -146,6 +146,8 @@ packed_unscale!(P::SPMatrixScaled{R}) where {R} =
     rmul_offdiags!(SPMatrix(P.dim, P.data, packed_isupper(P) ? :U : :L), sqrt(inv(R(2))))
 packed_unscale!(P::SPMatrixUnscaled) = P
 
+# While we define _to_linear_index here, we must still be careful to overload getindex of the CartesianIndex, as the scaling
+# is present in the linear, but should not in the Cartesian index.
 @inline function Base._to_linear_index(P::SPMatrix{<:Any,<:Any,Fmt}, row::Integer, col::Integer) where {Fmt}
     if (Fmt === :U || Fmt === :US ? Base.:≤ : Base.:≥)(row, col)
         return @inbounds rowcol_to_vec(P, row, col)
@@ -188,6 +190,7 @@ Base.@propagate_inbounds function Base.getindex(P::SPMatrix{R,V,:LS}, row::Integ
         return sqrt(inv(R(2))) * conj(P.data[@inbounds rowcol_to_vec(P, col, row)])
     end
 end
+Base.@propagate_inbounds Base.getindex(P::SPMatrix, I::CartesianIndex{2}) = P[I[1], I[2]]
 """
     P[idx] = X
 
@@ -236,6 +239,7 @@ Base.@propagate_inbounds function Base.setindex!(P::SPMatrix{R,V,:LS}, X, row::I
     end
     return X
 end
+Base.@propagate_inbounds Base.setindex!(P::SPMatrix, X, I::CartesianIndex{2}) = P[I[1], I[2]] = X
 Base.IndexStyle(::SPMatrix) = IndexLinear()
 Base.LinearIndices(P::SPMatrix) = LinearIndices(P.data)
 Base.IteratorSize(::Type{<:SPMatrix}) = Base.HasLength()
@@ -391,4 +395,65 @@ function SPMatrix(A::LinearAlgebra.HermOrSym{R,<:AbstractMatrix{R}}) where {R}
     result = SPMatrix{R}(undef, size(A, 1), A.uplo == 'U' ? :U : :L)
     trttp!(A.uplo, parent(A), result.data)
     return result
+end
+
+# the generic implementation will do this by iteration, but we will iterate over the vector
+function Base.:(==)(A::SPMatrix, B::AbstractMatrix)
+    axes(A) == axes(B) || return false
+    anymissing = false
+    for (ia, ib) in zip(CartesianIndices(A), CartesianIndices(B))
+        @inbounds eq = (A[ia] == B[ib])
+        if ismissing(eq)
+            anymissing = true
+        elseif !eq
+            return false
+        end
+    end
+    return anymissing ? missing : true
+end
+Base.:(==)(A::AbstractMatrix, B::SPMatrix) = B == A
+function Base.:(==)(A::SPMatrix, B::SPMatrix)
+    A.dim == B.dim || return false
+    packed_format(A) == packed_format(B) && return A.data == B.data
+    anymissing = false
+    if packed_isupper(A) == packed_isupper(B)
+        @assert(packed_isscaled(A) != packed_isscaled(B))
+        isqrt2 = sqrt(inv(eltype(packed_isscaled(A) ? A : B)(2)))
+        ia = firstindex(A.data)
+        ib = firstindex(B.data)
+        for j in 1:A.dim
+            if !packed_isupper(A)
+                @inbounds eq = (A.data[ia] == B.data[ib])
+                if ismissing(eq)
+                    anymissing = true
+                elseif !eq
+                    return false
+                end
+                ia += 1
+                ib += 1
+            end
+            for i in (packed_isupper(A) ? (1:j-1) : (j+1:A.dim))
+                @inbounds eq = ((packed_isscaled(A) ? isqrt2 * A.data[ia] : A.data[ia]) ==
+                                (packed_isscaled(B) ? isqrt2 * B.data[ib] : B.data[ib]))
+                if ismissing(eq)
+                    anymissing = true
+                elseif !eq
+                    return false
+                end
+                ia += 1
+                ib += 1
+            end
+            if packed_isupper(A)
+                @inbounds eq = (A.data[ia] == B.data[ib])
+                if ismissing(eq)
+                    anymissing = true
+                elseif !eq
+                    return false
+                end
+                ia += 1
+                ib += 1
+            end
+        end
+    end
+    return invoke(==, Tuple{SPMatrix,AbstractMatrix}, A, B)
 end

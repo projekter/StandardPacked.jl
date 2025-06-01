@@ -3,8 +3,11 @@ module StandardPackedStaticArrays
 import StandardPacked
 import StaticArrays
 
-# We need to be extra careful here - StaticArrays's broadcasting has higher precedence, but will try to write n^2 elements to
-# our linear index. But we can spell this out and only copy the upper triangle.
+# Resolve ambiguity to use StaticArrays at first...
+@inline Base.copyto!(dest::StandardPacked.SPMatrix, B::Broadcast.Broadcasted{<:StaticArrays.StaticArrayStyle}) =
+    StaticArrays._copyto!(dest, B)
+
+# ...and then resolve to write only what we need, which is one triangle
 @generated function StaticArrays._broadcast!(f, ::StaticArrays.Size{newsize}, dest::StandardPacked.SPMatrix,
     s::Tuple{Vararg{StaticArrays.Size}}, a...) where {newsize}
     sizes = [sz.parameters[1] for sz in s.parameters]

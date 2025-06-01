@@ -125,7 +125,8 @@ end
             @test vec(pm .+ data) == data .+ data
             pmc .= pm .+ 3 .* pm
             @test vec(pmc) == 4data
-            @test_throws ErrorException pm .+ otherscaled
+            otherscaled = sca === :S ? packed_unscale!(pmc) : packed_scale!(pmc)
+            @test pm .+ otherscaled ≈ 5pm
         end
 
         if elty <: LinearAlgebra.BlasFloat # we need BLAS support for these tests
@@ -1086,6 +1087,50 @@ Base.eps(::Type{Complex{R}}) where {R} = 10eps(R)
         end
     end
 end end
+
+@testset "Broadcasting" begin
+    @testset "Same format" begin
+        output = SPMatrix(2, [15., 27., 31.], :U) .+ SPMatrix(2, [11., 17., 32.], :U)
+        @test output isa SPMatrix{Float64,Vector{Float64},:U}
+        @test output == [15+11 27+17; 27+17 31+32]
+    end
+    @testset "Generic matrix" begin
+        output = [1. 2.; 3. 4.] .+ SPMatrix(2, [15., 27., 31.], :U)
+        @test output isa Matrix
+        @test output == [1+15 2+27; 3+27 4+31]
+    end
+    @testset "Different formats" begin
+        output = SPMatrix(2, [15., 27., 31.], :U) .+ packed_scale!(SPMatrix(2, [11., 17., 32.], :U))
+        @test output isa Matrix
+        @test output == [15+11 27+17; 27+17 31+32]
+
+        output = SPMatrix(2, [15., 27., 31.], :U) .+ SPMatrix(2, [11., 17., 32.], :L)
+        @test output isa Matrix
+        @test output == [15+11 27+17; 27+17 31+32]
+    end
+    @testset "Copy into matrix" begin
+        test = SPMatrix{Float64}(undef, 2, :U)
+        test .= [14. 8.; 19. 20.]
+        @test test == [14. 8.; 8. 20.]
+
+        scoutput = SPMatrix{Float64}(undef, 2, :U)
+        scoutput .= 3 .* test .+ SPMatrix(2, [11., 17., 32.], :U)
+        @test scoutput ≈ [3*14.0+11. 3*8.0+17.; 3*8.0+17. 3*20.0+32.]
+    end
+    @testset "Combination with vector" begin
+        @test SPMatrix(2, [15., 27., 31.], :U) .+ [1, 2, 3] == [16., 29., 34.]
+
+        @test_throws DimensionMismatch SPMatrix(2, [15., 27., 31.], :U) .+ SPMatrix(2, [11., 17., 32.], :U) .+ [1, 2, 3]
+        @test_throws DimensionMismatch SPMatrix(2, [15., 27., 31.], :U) .+ [1, 2, 3] .+ SPMatrix(2, [11., 17., 32.], :U)
+
+        output = SPMatrix{Float64}(undef, 2, :U)
+        output .= SPMatrix(2, [15., 27., 31.], :U) .+ [1, 2, 3]
+        @test output == [16. 29.; 29. 34.]
+
+        output = SPMatrix{Float64}(undef, 2, :L)
+        @test_throws DimensionMismatch (output .= SPMatrix(2, [15., 27., 31.], :U) .+ [1, 2, 3])
+    end
+end
 
 @testset "StaticArrays broadcasting" begin
     base = collect(1:16)
