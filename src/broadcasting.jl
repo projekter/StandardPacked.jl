@@ -104,7 +104,7 @@ end
             dest[idx] = bc′[j, j]
             idx += 1
             for i in j+1:size(dest, 1)
-                dest[idx] = bc′[i, j]
+                dest[idx] = sqrt2 * bc′[i, j]
                 idx += 1
             end
         else
