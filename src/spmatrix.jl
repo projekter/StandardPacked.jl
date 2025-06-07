@@ -418,7 +418,7 @@ function Base.:(==)(A::SPMatrix, B::SPMatrix)
     anymissing = false
     if packed_isupper(A) == packed_isupper(B)
         @assert(packed_isscaled(A) != packed_isscaled(B))
-        isqrt2 = sqrt(inv(eltype(packed_isscaled(A) ? A : B)(2)))
+        sqrt2 = sqrt(eltype(packed_isscaled(A) ? A : B)(2))
         ia = firstindex(A.data)
         ib = firstindex(B.data)
         for j in 1:A.dim
@@ -433,8 +433,8 @@ function Base.:(==)(A::SPMatrix, B::SPMatrix)
                 ib += 1
             end
             for i in (packed_isupper(A) ? (1:j-1) : (j+1:A.dim))
-                @inbounds eq = ((packed_isscaled(A) ? isqrt2 * A.data[ia] : A.data[ia]) ==
-                                (packed_isscaled(B) ? isqrt2 * B.data[ib] : B.data[ib]))
+                @inbounds eq = ((packed_isscaled(A) ? A.data[ia] : sqrt2 * A.data[ia]) ==
+                                (packed_isscaled(B) ? B.data[ib] : sqrt2 * B.data[ib]))
                 if ismissing(eq)
                     anymissing = true
                 elseif !eq
@@ -454,6 +454,7 @@ function Base.:(==)(A::SPMatrix, B::SPMatrix)
                 ib += 1
             end
         end
+        return anymissing ? missing : true
     end
     return invoke(==, Tuple{SPMatrix,AbstractMatrix}, A, B)
 end
