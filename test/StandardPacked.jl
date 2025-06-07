@@ -1116,6 +1116,18 @@ end end
         scoutput = SPMatrix{Float64}(undef, 2, :U)
         scoutput .= 3 .* test .+ SPMatrix(2, [11., 17., 32.], :U)
         @test scoutput ≈ [3*14.0+11. 3*8.0+17.; 3*8.0+17. 3*20.0+32.]
+
+        test = SPMatrix{Float64}(undef, 2, :US)
+        test .= [14. 8.; 19. 20.]
+        @test test ≈ [14. 8.; 8. 20.]
+
+        test = SPMatrix{Float64}(undef, 2, :L)
+        test .= [14. 8.; 19. 20.]
+        @test test == [14. 19.; 19. 20.]
+
+        test = SPMatrix{Float64}(undef, 2, :LS)
+        test .= [14. 8.; 19. 20.]
+        @test test ≈ [14. 19.; 19. 20.]
     end
     @testset "Combination with vector" begin
         @test SPMatrix(2, [15., 27., 31.], :U) .+ [1, 2, 3] == [16., 29., 34.]
@@ -1129,6 +1141,23 @@ end end
 
         output = SPMatrix{Float64}(undef, 2, :L)
         @test_throws DimensionMismatch (output .= SPMatrix(2, [15., 27., 31.], :U) .+ [1, 2, 3])
+    end
+    @testset "Equality" begin
+        mdata = rand(3, 3)
+        mdata .+= mdata'
+        for fmt_a in (:U, :US, :L, :LS), fmt_b in (:U, :US, :L, :LS)
+            @testset let fmt_a=fmt_a, fmt_b=fmt_b
+                sma = SPMatrix{Float64}(undef, 3, fmt_a)
+                smb = SPMatrix{Float64}(undef, 3, fmt_b)
+                copyto!(sma, mdata)
+                copyto!(smb, mdata)
+                @test sma == smb skip=(fmt_a == :U && fmt_b == :LS ||
+                                       fmt_a == :US && fmt_b == :L ||
+                                       fmt_a == :L && fmt_b == :US ||
+                                       fmt_a == :LS && fmt_b == :U) # these cases fall back to the generic routine and we don't
+                                                                    # have floating point equality
+            end
+        end
     end
 end
 
