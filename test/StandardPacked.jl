@@ -1146,17 +1146,15 @@ end end
         mdata = rand(3, 3)
         mdata .+= mdata'
         for fmt_a in (:U, :US, :L, :LS), fmt_b in (:U, :US, :L, :LS)
-            @testset let fmt_a=fmt_a, fmt_b=fmt_b
-                sma = SPMatrix{Float64}(undef, 3, fmt_a)
-                smb = SPMatrix{Float64}(undef, 3, fmt_b)
-                copyto!(sma, mdata)
-                copyto!(smb, mdata)
-                @test sma == smb skip=(fmt_a == :U && fmt_b == :LS ||
-                                       fmt_a == :US && fmt_b == :L ||
-                                       fmt_a == :L && fmt_b == :US ||
-                                       fmt_a == :LS && fmt_b == :U) # these cases fall back to the generic routine and we don't
-                                                                    # have floating point equality
-            end
+            sma = SPMatrix{Float64}(undef, 3, fmt_a)
+            smb = SPMatrix{Float64}(undef, 3, fmt_b)
+            copyto!(sma, mdata)
+            copyto!(smb, mdata)
+            @test sma == smb skip=(fmt_a == :U && fmt_b == :LS ||
+                                    fmt_a == :US && fmt_b == :L ||
+                                    fmt_a == :L && fmt_b == :US ||
+                                    fmt_a == :LS && fmt_b == :U) # these cases fall back to the generic routine and we don't
+                                                                # have floating point equality
         end
     end
 end
