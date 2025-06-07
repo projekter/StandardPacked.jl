@@ -32,6 +32,11 @@ for kind in (:U, :US, :L, :LS)
     end
 end
 
+if VERSION < v"1.10"
+    _Broadcasted(bc::Broadcast.Broadcasted, axes) = Broadcast.Broadcasted(bc.f, bc.args, axes)
+else
+    _Broadcasted(bc::Broadcast.Broadcasted, axes) = Broadcast.Broadcasted(bc.style, bc.f, bc.args, axes)
+end
 _unwrap(p::SPMatrix) = p.data
 _unwrap(p) = p
 function Broadcast.instantiate(bc::Broadcast.Broadcasted{<:SPBroadcastingVector})
@@ -42,10 +47,10 @@ function Broadcast.instantiate(bc::Broadcast.Broadcasted{<:SPBroadcastingVector}
         axes = bc.axes
         Broadcast.check_broadcast_axes(axes, args...)
     end
-    return Broadcast.Broadcasted(bc.style, bc.f, bc.args, axes)
+    return _Broadcasted(bc, axes)
 end
 @inline function Broadcast.materialize!(::SPBroadcastingVector, dest::SPMatrix, bc::Broadcast.Broadcasted{<:Any})
-    return copyto!(dest, Broadcast.instantiate(Broadcast.Broadcasted(bc.style, bc.f, bc.args, axes(dest.data))))
+    return copyto!(dest, Broadcast.instantiate(_Broadcasted(bc, axes(dest.data))))
 end
 
 @inline function Base.copyto!(dest::SPMatrix{R,<:Any,Fmt}, bc::Broadcast.Broadcasted{SPBroadcasting{Fmt′}}) where {R,Fmt,Fmt′}
